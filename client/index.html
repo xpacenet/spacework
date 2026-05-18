@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SpaceWork — Virtual Spaceship Workspace</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+      body { background: #000; overflow: hidden; font-family: 'Inter', sans-serif; color: #fff; }
+      #canvas { display: block; width: 100vw; height: 100vh; }
+
+      /* ── LOBBY ─────────────────────────────────────────────────────────── */
+      #lobby {
+        position: fixed; inset: 0; z-index: 20;
+        background: radial-gradient(ellipse at center, #0a0e1a 0%, #000 100%);
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 0;
+      }
+
+      .lobby-glow {
+        position: absolute; width: 600px; height: 600px; border-radius: 50%;
+        background: radial-gradient(circle, rgba(0,100,255,0.12) 0%, transparent 70%);
+        pointer-events: none;
+      }
+
+      .lobby-card {
+        position: relative; z-index: 1;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 20px;
+        padding: 48px 56px;
+        display: flex; flex-direction: column; align-items: center; gap: 20px;
+        backdrop-filter: blur(20px);
+        width: 400px;
+      }
+
+      .lobby-logo {
+        font-size: 0.75rem; letter-spacing: 0.25em; color: #0af;
+        text-transform: uppercase; font-weight: 600;
+      }
+      .lobby-title {
+        font-size: 2.6rem; font-weight: 700; letter-spacing: -0.02em;
+        background: linear-gradient(135deg, #fff 0%, #88ccff 100%);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        line-height: 1;
+      }
+      .lobby-sub {
+        font-size: 0.9rem; color: rgba(255,255,255,0.45); text-align: center;
+        line-height: 1.5;
+      }
+
+      .lobby-zones {
+        display: flex; gap: 8px; margin: 4px 0;
+      }
+      .zone-chip {
+        padding: 4px 12px; border-radius: 20px; font-size: 0.72rem;
+        font-weight: 600; letter-spacing: 0.08em;
+      }
+      .zone-chip.bridge { background: rgba(0,100,255,0.2); color: #4af; border: 1px solid rgba(0,150,255,0.3); }
+      .zone-chip.lab    { background: rgba(0,255,200,0.15); color: #0fc; border: 1px solid rgba(0,255,200,0.25); }
+      .zone-chip.lounge { background: rgba(140,0,255,0.2); color: #c6f; border: 1px solid rgba(160,0,255,0.3); }
+
+      .lobby-input {
+        width: 100%;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.12);
+        color: #fff; padding: 12px 16px;
+        border-radius: 10px; font-size: 1rem;
+        outline: none; transition: border-color 0.2s;
+        font-family: inherit;
+      }
+      .lobby-input::placeholder { color: rgba(255,255,255,0.3); }
+      .lobby-input:focus { border-color: #0af; background: rgba(0,150,255,0.08); }
+
+      .lobby-btn {
+        width: 100%;
+        background: linear-gradient(135deg, #0055ff, #0099ff);
+        color: #fff; border: none;
+        padding: 14px 32px; border-radius: 10px;
+        font-size: 1rem; font-weight: 600;
+        cursor: pointer; transition: all 0.2s;
+        font-family: inherit; letter-spacing: 0.02em;
+      }
+      .lobby-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 30px rgba(0,100,255,0.4); }
+      .lobby-btn:active { transform: translateY(0); }
+
+      /* ── LOADING BAR ───────────────────────────────────────────────────── */
+      #loading {
+        position: fixed; inset: 0; z-index: 15;
+        background: #000;
+        display: none; flex-direction: column;
+        align-items: center; justify-content: center; gap: 20px;
+      }
+      #loading.visible { display: flex; }
+      .loading-title { font-size: 1.1rem; font-weight: 600; color: #0af; letter-spacing: 0.1em; }
+      .loading-bar-bg {
+        width: 280px; height: 4px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden;
+      }
+      .loading-bar-fill {
+        height: 100%; width: 0%; background: linear-gradient(90deg, #0055ff, #0af);
+        border-radius: 4px; transition: width 0.3s;
+      }
+      .loading-sub { font-size: 0.8rem; color: rgba(255,255,255,0.35); }
+
+      /* ── HUD ───────────────────────────────────────────────────────────── */
+      #hud { position: fixed; inset: 0; pointer-events: none; display: none; }
+      #hud.visible { display: block; }
+
+      /* Top bar */
+      .hud-top {
+        position: absolute; top: 0; left: 0; right: 0;
+        padding: 16px 20px;
+        display: flex; align-items: center; justify-content: space-between;
+        background: linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 100%);
+      }
+      .hud-logo {
+        font-size: 0.8rem; font-weight: 700; letter-spacing: 0.15em;
+        color: rgba(255,255,255,0.9);
+      }
+      .hud-online {
+        display: flex; align-items: center; gap: 6px;
+        background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1);
+        padding: 5px 12px; border-radius: 20px; font-size: 0.78rem; color: rgba(255,255,255,0.8);
+      }
+      .hud-online-dot { width: 7px; height: 7px; border-radius: 50%; background: #0f0; animation: pulse 2s infinite; }
+
+      /* Zone indicator — big, center bottom */
+      #zone-banner {
+        position: absolute; bottom: 0; left: 0; right: 0;
+        display: flex; flex-direction: column; align-items: center;
+        padding-bottom: 28px;
+        background: linear-gradient(to top, rgba(0,0,0,0.65) 0%, transparent 100%);
+      }
+      .zone-name {
+        font-size: 1.1rem; font-weight: 700; letter-spacing: 0.2em;
+        text-transform: uppercase; opacity: 0.95;
+        text-shadow: 0 0 20px currentColor;
+        transition: color 0.4s, text-shadow 0.4s;
+      }
+      .zone-desc {
+        font-size: 0.75rem; color: rgba(255,255,255,0.45); margin-top: 3px;
+        letter-spacing: 0.05em;
+      }
+
+      /* Zone list (inside minimap header area — hidden, handled by minimap canvas) */
+      #zone-map { display: none; }
+
+      /* Controls hint — bottom left */
+      #controls-hint {
+        position: absolute; bottom: 28px; left: 20px;
+        background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 10px; padding: 10px 14px;
+        font-size: 0.72rem; color: rgba(255,255,255,0.5);
+        line-height: 1.9;
+      }
+      .hint-row { display: flex; align-items: center; gap: 8px; }
+      .key {
+        display: inline-flex; align-items: center; justify-content: center;
+        background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2);
+        border-radius: 4px; padding: 1px 6px; font-size: 0.68rem;
+        color: #fff; min-width: 22px; font-weight: 600;
+      }
+
+      /* Mode badge */
+      #mode-badge {
+        position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+        padding: 5px 14px; border-radius: 20px; font-size: 0.75rem; font-weight: 700;
+        letter-spacing: 0.1em; border: 1px solid; transition: all 0.3s;
+        background: rgba(0,100,255,0.2); border-color: rgba(0,150,255,0.4); color: #4af;
+      }
+
+      /* Toast notification */
+      #hud-toast {
+        position: absolute; top: 90px; left: 50%; transform: translateX(-50%);
+        background: rgba(0,0,0,0.75); border: 1px solid rgba(255,255,255,0.15);
+        padding: 7px 18px; border-radius: 20px; font-size: 0.8rem; color: #fff;
+        opacity: 0; transition: opacity 0.3s; pointer-events: none; white-space: nowrap;
+      }
+      #hud-toast.show { opacity: 1; }
+
+      /* Overview mode overlay */
+      #overview-panel {
+        position: absolute; inset: 0;
+        display: none; align-items: flex-start; justify-content: center;
+        padding-top: 16px; pointer-events: none;
+        background: rgba(255,140,0,0.04);
+        border: 2px solid rgba(255,140,0,0.2);
+      }
+      .overview-banner {
+        background: rgba(255,140,0,0.15); border: 1px solid rgba(255,140,0,0.4);
+        border-radius: 8px; padding: 7px 20px; font-size: 0.8rem; font-weight: 600;
+        color: #ffaa00; letter-spacing: 0.1em;
+      }
+
+      /* Overview destination marker */
+      #overview-marker {
+        position: absolute; display: none;
+        width: 24px; height: 24px;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+      }
+      #overview-marker::before, #overview-marker::after {
+        content: ''; position: absolute; border-radius: 50%;
+        border: 2px solid #ffaa00;
+      }
+      #overview-marker::before { inset: 0; animation: ping 1s ease-out infinite; }
+      #overview-marker::after  { inset: 5px; background: rgba(255,170,0,0.5); }
+      @keyframes ping {
+        0%   { transform: scale(1); opacity: 1; }
+        100% { transform: scale(2.5); opacity: 0; }
+      }
+
+      /* Minimap */
+      #minimap {
+        position: absolute; left: 20px; top: 50%;
+        transform: translateY(-50%);
+        background: rgba(0,5,20,0.88);
+        border: 1px solid rgba(100,150,255,0.25);
+        border-radius: 10px; overflow: hidden;
+        width: 180px;
+      }
+      .minimap-header {
+        padding: 6px 10px;
+        font-size: 0.65rem; font-weight: 700; letter-spacing: 0.15em;
+        color: rgba(100,180,255,0.7);
+        border-bottom: 1px solid rgba(100,150,255,0.15);
+        background: rgba(0,10,40,0.6);
+        display: flex; align-items: center; gap: 6px;
+      }
+      .minimap-dot { width: 6px; height: 6px; border-radius: 50%; background: #0ff; animation: pulse 2s infinite; }
+      #minimap-canvas { display: block; width: 180px; height: 320px; }
+
+      /* Click-to-start overlay */
+      #click-to-start {
+        position: fixed; inset: 0; z-index: 12;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 12px;
+        cursor: pointer;
+      }
+      #click-to-start .cts-box {
+        background: rgba(0,0,0,0.7); border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 14px; padding: 24px 40px; text-align: center;
+        backdrop-filter: blur(10px);
+      }
+      #click-to-start h2 { font-size: 1.2rem; margin-bottom: 6px; }
+      #click-to-start p  { font-size: 0.85rem; color: rgba(255,255,255,0.5); }
+      #click-to-start.hidden { display: none; }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
+      }
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(6px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .fade-in { animation: fadeIn 0.5s ease forwards; }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+
+    <!-- LOBBY -->
+    <div id="lobby">
+      <div class="lobby-glow"></div>
+      <div class="lobby-card fade-in">
+        <span class="lobby-logo">Virtual Workspace</span>
+        <h1 class="lobby-title">SpaceWork</h1>
+        <p class="lobby-sub">A spaceship in orbit where your team lives,<br/>meets, and builds together.</p>
+        <div class="lobby-zones">
+          <span class="zone-chip bridge">Bridge</span>
+          <span class="zone-chip lab">Lab</span>
+          <span class="zone-chip lounge">Lounge</span>
+        </div>
+        <input class="lobby-input" id="username" type="text" placeholder="Enter your name" maxlength="20" autofocus />
+        <button class="lobby-btn" id="enter-btn">Board the Ship →</button>
+      </div>
+    </div>
+
+    <!-- LOADING -->
+    <div id="loading">
+      <div class="loading-title">PREPARING SHIP</div>
+      <div class="loading-bar-bg"><div class="loading-bar-fill" id="load-fill"></div></div>
+      <div class="loading-sub" id="load-text">Loading spaceship...</div>
+    </div>
+
+    <!-- CLICK TO START -->
+    <div id="click-to-start" class="hidden">
+      <div class="cts-box fade-in">
+        <h2>Click to explore the ship</h2>
+        <p>Your mouse will be locked for look controls.<br/>Press <strong>ESC</strong> to release at any time.</p>
+      </div>
+    </div>
+
+    <!-- HUD -->
+    <div id="hud">
+      <div class="hud-top">
+        <span class="hud-logo">SPACEWORK</span>
+        <div class="hud-online">
+          <div class="hud-online-dot"></div>
+          <span id="online-count">1 aboard</span>
+        </div>
+      </div>
+
+      <!-- Minimap -->
+      <div id="minimap">
+        <div class="minimap-header">
+          <div class="minimap-dot"></div>
+          SHIP MAP
+        </div>
+        <canvas id="minimap-canvas"></canvas>
+      </div>
+
+      <!-- Mode badge -->
+      <div id="mode-badge">🎮 EXPLORE</div>
+
+      <!-- Toast -->
+      <div id="hud-toast"></div>
+
+      <!-- Overview overlay -->
+      <div id="overview-panel">
+        <div class="overview-banner">🗺 OVERVIEW MODE — Click anywhere on ship to move there &nbsp;|&nbsp; <kbd style="background:rgba(255,255,255,0.1);padding:1px 6px;border-radius:4px;">TAB</kbd> to exit</div>
+      </div>
+
+      <!-- Overview destination ping -->
+      <div id="overview-marker"></div>
+
+      <!-- Zone map (hidden — replaced by minimap) -->
+      <div id="zone-map"></div>
+
+      <div id="zone-banner">
+        <div class="zone-name" id="zone-name" style="color:#4af;">BRIDGE</div>
+        <div class="zone-desc" id="zone-desc">Command &amp; Meetings</div>
+      </div>
+
+      <div id="controls-hint">
+        <div class="hint-row"><span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span>&nbsp; Move</div>
+        <div class="hint-row"><span class="key">Mouse</span>&nbsp; Look around</div>
+        <div class="hint-row"><span class="key">TAB</span>&nbsp; Overview mode</div>
+        <div class="hint-row"><span class="key">R</span>&nbsp; Respawn at Bridge</div>
+        <div class="hint-row"><span class="key">ESC</span>&nbsp; Release cursor</div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
