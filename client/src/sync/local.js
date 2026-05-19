@@ -1,48 +1,64 @@
 /**
- * LocalSync — instant tab-to-tab via BroadcastChannel.
+ * LocalSync — localStorage presence + BroadcastChannel for moves.
  *
- * Protocol (no loops):
- *   HELLO   → "I just boarded" — every live tab replies with PRESENT (once)
- *   PRESENT → "I'm already here" — received by the new tab, NOT replied to
- *   MOVE    → position every 50ms
- *   BYE     → leaving
+ * Presence (discovery):
+ *   Every tab writes its own entry to localStorage every 500ms.
+ *   Every tab scans all entries every 150ms.
+ *   New entry  → peer:join.   Stale entry (>3s) → peer:leave.
+ *   No handshake. No ordering. Works regardless of which tab joined first.
  *
- * Why two types?
- *   If Tab A replies to HELLO with another HELLO, Tab B replies back, and
- *   you get an infinite ping-pong. PRESENT breaks the cycle: it carries the
- *   same payload but live tabs never reply to it.
+ * Movement (fast path):
+ *   BroadcastChannel carries MOVE-only messages at 50ms.
+ *   No acknowledgement needed — if a frame is lost, the next one corrects it.
  */
 
-const CHANNEL = 'spacework-local-v1'
+const PREFIX  = 'sw_peer_'
+const TTL_MS  = 3000    // entry older than 3s = that tab is gone
+const HB_MS   = 500     // how often we refresh our own entry
+const SCAN_MS = 150     // how often we scan for new/gone peers
 
 export class LocalSync {
-  #ch       = null
-  #id       = null
-  #username = null
+  #id       = Math.random().toString(36).slice(2, 9)
+  #username = ''
+  #pos      = { x: 0, y: 0, z: 0, ry: 0 }
+  #ch       = null    // BroadcastChannel — MOVE only
+  #known    = new Map()  // peerId → username
   #handlers = {}
-
-  constructor(username) {
-    this.#id       = Math.random().toString(36).slice(2, 9)
-    this.#username = username
-  }
+  #hb       = null
+  #scan     = null
 
   get id() { return this.#id }
 
-  start() {
-    this.#ch = new BroadcastChannel(CHANNEL)
-    this.#ch.onmessage = e => this.#handle(e.data)
-    // Announce — every live tab will reply once with PRESENT
-    this.#post('HELLO')
+  start(username) {
+    this.#username = username
+    this.#write()                                   // register immediately
+    this.#hb   = setInterval(() => this.#write(),  HB_MS)
+    this.#scan = setInterval(() => this.#poll(),   SCAN_MS)
+
+    this.#ch = new BroadcastChannel('sw_move_v1')
+    this.#ch.onmessage = ({ data }) => {
+      if (!data || data.from === this.#id) return
+      if (data.type === 'MOVE')   this.#fire('MOVE',   data)
+      if (data.type === 'COMMIT') this.#fire('COMMIT', data)
+    }
   }
 
   stop() {
-    this.#post('BYE')
+    clearInterval(this.#hb)
+    clearInterval(this.#scan)
+    try { localStorage.removeItem(PREFIX + this.#id) } catch {}
     this.#ch?.close()
     this.#ch = null
   }
 
-  move(x, y, z, ry = 0) { this.#post('MOVE', { pos: { x, y, z, ry } }) }
-  commit(data)   { this.#post('COMMIT', { commit: data }) }
+  move(x, y, z, ry = 0) {
+    this.#pos = { x, y, z, ry }
+    this.#ch?.postMessage({ type: 'MOVE', from: this.#id, pos: { x, y, z, ry } })
+  }
+
+  commit(data) {
+    this.#ch?.postMessage({ type: 'COMMIT', from: this.#id, commit: data })
+  }
 
   on(type, cb) {
     if (!this.#handlers[type]) this.#handlers[type] = []
@@ -52,30 +68,50 @@ export class LocalSync {
 
   // ── internal ───────────────────────────────────────────────────────────────
 
-  #post(type, extra = {}) {
-    this.#ch?.postMessage({ type, from: this.#id, username: this.#username, ...extra })
+  #write() {
+    try {
+      localStorage.setItem(PREFIX + this.#id, JSON.stringify({
+        id: this.#id, username: this.#username, ...this.#pos, ts: Date.now(),
+      }))
+    } catch {}
   }
 
-  #handle(msg) {
-    if (!msg || msg.from === this.#id) return
+  #poll() {
+    const now   = Date.now()
+    const alive = new Set()
 
-    if (msg.type === 'HELLO') {
-      // Someone new joined — let them know we exist (PRESENT, not HELLO, no loop)
-      this.#post('PRESENT')
-      // Treat incoming HELLO same as PRESENT for peer tracking
-      this.#fire('PEER', msg)
-      return
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i)
+      if (!key?.startsWith(PREFIX)) continue
+      const peerId = key.slice(PREFIX.length)
+      if (peerId === this.#id) continue
+
+      let data
+      try { data = JSON.parse(localStorage.getItem(key)) } catch {
+        try { localStorage.removeItem(key) } catch {}
+        continue
+      }
+
+      if (now - data.ts > TTL_MS) {
+        try { localStorage.removeItem(key) } catch {}
+        continue
+      }
+
+      alive.add(peerId)
+
+      if (!this.#known.has(peerId)) {
+        this.#known.set(peerId, data.username)
+        this.#fire('PEER', { from: peerId, username: data.username })
+      }
     }
 
-    if (msg.type === 'PRESENT') {
-      // A live tab is announcing itself back to us — add them, don't reply
-      this.#fire('PEER', msg)
-      return
+    // Peers whose entries disappeared
+    for (const [id] of this.#known) {
+      if (!alive.has(id)) {
+        this.#known.delete(id)
+        this.#fire('BYE', { from: id })
+      }
     }
-
-    if (msg.type === 'BYE')    { this.#fire('BYE',    msg); return }
-    if (msg.type === 'MOVE')   { this.#fire('MOVE',   msg); return }
-    if (msg.type === 'COMMIT') { this.#fire('COMMIT', msg); return }
   }
 
   #fire(type, payload) {
