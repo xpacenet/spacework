@@ -170,7 +170,10 @@ function startBoarding() {
     spaceSync.addEventListener('peer:move', e => {
       const { peerId, pos } = e.detail
       const av = _avatars.get(peerId)
-      if (av) av.position.lerp(new THREE.Vector3(pos.x, pos.y, pos.z), 0.3)
+      if (!av) return
+      // Lerp at 0.6 — fast enough to feel real-time at 50ms broadcast interval
+      av.position.lerp(new THREE.Vector3(pos.x, pos.y, pos.z), 0.6)
+      if (pos.ry !== undefined) av.rotation.y = pos.ry
     })
 
     spaceSync.addEventListener('peer:leave', e => {
@@ -182,10 +185,11 @@ function startBoarding() {
       }
     })
 
-    // Broadcast own position every 50ms
+    // Broadcast own position + rotation every 50ms
     setInterval(() => {
       const pos = player.getPosition()
-      spaceSync.move(pos.x, pos.y, pos.z)
+      const rot = player.getRotation()
+      spaceSync.move(pos.x, pos.y, pos.z, rot.y)
     }, 50)
 
     // ── DDHSN swarm + visibility ──────────────────────────────────────────

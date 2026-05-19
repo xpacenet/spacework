@@ -1,14 +1,16 @@
 /**
  * LocalSync — instant tab-to-tab via BroadcastChannel.
  *
- * Protocol:
- *   HELLO  → "I just boarded, who else is here?"
- *   HELLO  ← every live tab replies with their own HELLO (so late joiners see everyone)
- *   MOVE   → position every 50ms
- *   BYE    → leaving
+ * Protocol (no loops):
+ *   HELLO   → "I just boarded" — every live tab replies with PRESENT (once)
+ *   PRESENT → "I'm already here" — received by the new tab, NOT replied to
+ *   MOVE    → position every 50ms
+ *   BYE     → leaving
  *
- * Because BroadcastChannel is same-origin only, this works the moment
- * a second tab opens — no WebRTC, no signaling, no latency.
+ * Why two types?
+ *   If Tab A replies to HELLO with another HELLO, Tab B replies back, and
+ *   you get an infinite ping-pong. PRESENT breaks the cycle: it carries the
+ *   same payload but live tabs never reply to it.
  */
 
 const CHANNEL = 'spacework-local-v1'
@@ -18,7 +20,6 @@ export class LocalSync {
   #id       = null
   #username = null
   #handlers = {}
-  #alive    = false
 
   constructor(username) {
     this.#id       = Math.random().toString(36).slice(2, 9)
@@ -30,20 +31,18 @@ export class LocalSync {
   start() {
     this.#ch = new BroadcastChannel(CHANNEL)
     this.#ch.onmessage = e => this.#handle(e.data)
-    this.#alive = true
-    // Announce ourselves — every live tab will reply with their own HELLO
-    this.#send('HELLO')
+    // Announce — every live tab will reply once with PRESENT
+    this.#post('HELLO')
   }
 
   stop() {
-    if (!this.#alive) return
-    this.#send('BYE')
-    this.#ch.close()
-    this.#alive = false
+    this.#post('BYE')
+    this.#ch?.close()
+    this.#ch = null
   }
 
-  move(x, y, z)    { this.#send('MOVE',   { pos: { x, y, z } }) }
-  commit(data)      { this.#send('COMMIT', { commit: data }) }
+  move(x, y, z, ry = 0) { this.#post('MOVE', { pos: { x, y, z, ry } }) }
+  commit(data)   { this.#post('COMMIT', { commit: data }) }
 
   on(type, cb) {
     if (!this.#handlers[type]) this.#handlers[type] = []
@@ -53,20 +52,33 @@ export class LocalSync {
 
   // ── internal ───────────────────────────────────────────────────────────────
 
-  #send(type, extra = {}) {
-    if (!this.#alive && type !== 'HELLO') return
+  #post(type, extra = {}) {
     this.#ch?.postMessage({ type, from: this.#id, username: this.#username, ...extra })
   }
 
   #handle(msg) {
-    if (!msg || msg.from === this.#id) return   // ignore own messages
+    if (!msg || msg.from === this.#id) return
 
-    // When someone new announces themselves, reply so they know we exist too
     if (msg.type === 'HELLO') {
-      this.#send('HELLO')
+      // Someone new joined — let them know we exist (PRESENT, not HELLO, no loop)
+      this.#post('PRESENT')
+      // Treat incoming HELLO same as PRESENT for peer tracking
+      this.#fire('PEER', msg)
+      return
     }
 
-    const handlers = this.#handlers[msg.type]
-    if (handlers) handlers.forEach(cb => cb(msg))
+    if (msg.type === 'PRESENT') {
+      // A live tab is announcing itself back to us — add them, don't reply
+      this.#fire('PEER', msg)
+      return
+    }
+
+    if (msg.type === 'BYE')    { this.#fire('BYE',    msg); return }
+    if (msg.type === 'MOVE')   { this.#fire('MOVE',   msg); return }
+    if (msg.type === 'COMMIT') { this.#fire('COMMIT', msg); return }
+  }
+
+  #fire(type, payload) {
+    this.#handlers[type]?.forEach(cb => cb(payload))
   }
 }

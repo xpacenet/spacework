@@ -42,20 +42,14 @@ export class SpaceSync extends EventTarget {
     // ── Tier 1: same-browser tabs via BroadcastChannel ────────────────────
     this.#local = new LocalSync(username)
 
-    this.#local.on('HELLO', ({ from, username: u }) => {
-      if (this.#peers.has(from)) return    // already know this peer
+    this.#local.on('PEER', ({ from, username: u }) => {
+      if (this.#peers.has(from)) return
       this.#addPeer(from, u, 'local')
     })
 
-    this.#local.on('BYE', ({ from }) => this.#removePeer(from))
-
-    this.#local.on('MOVE', ({ from, pos }) => {
-      this.#emit('peer:move', { peerId: from, pos })
-    })
-
-    this.#local.on('COMMIT', ({ from, commit }) => {
-      this.#emit('commit', { from, commit })
-    })
+    this.#local.on('BYE',    ({ from })        => this.#removePeer(from))
+    this.#local.on('MOVE',   ({ from, pos })   => this.#emit('peer:move', { peerId: from, pos }))
+    this.#local.on('COMMIT', ({ from, commit })=> this.#emit('commit', { from, commit }))
 
     this.#local.start()    // sends HELLO; every live tab replies automatically
 
@@ -83,9 +77,9 @@ export class SpaceSync extends EventTarget {
     this.#started = false
   }
 
-  move(x, y, z) {
-    this.#local?.move(x, y, z)
-    this.#remote?.move(x, y, z)
+  move(x, y, z, ry = 0) {
+    this.#local?.move(x, y, z, ry)
+    this.#remote?.move(x, y, z, ry)
   }
 
   broadcastCommit(data) {

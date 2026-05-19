@@ -64,8 +64,8 @@ export class RemoteSync {
     this.#room?.leave()
   }
 
-  move(x, y, z) {
-    this.#sendMove?.({ pos: { x, y, z } })
+  move(x, y, z, ry = 0) {
+    this.#sendMove?.({ pos: { x, y, z, ry } })
   }
 
   on(type, cb) {
