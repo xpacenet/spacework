@@ -4,6 +4,9 @@ import { buildScreens }      from './scene/screens.js'
 import { initPlayer }        from './player/index.js'
 import { initMultiplayer }   from './multiplayer/index.js'
 import { initScreenOverlay } from './ui/screenOverlay.js'
+import { SwarmNetwork, SwarmNode } from './network/swarm.js'
+import { VisibilityLayer, VISIBILITY } from './network/visibility.js'
+import { openNetworkMap }    from './ui/networkMap.js'
 
 // ── DOM refs ──────────────────────────────────────────────────────────────
 const lobby        = document.getElementById('lobby')
@@ -114,6 +117,19 @@ function startBoarding() {
 
     // ── Multiplayer ───────────────────────────────────────────────────────
     const mp = initMultiplayer(connectMode, config, scene, player, username, hud)
+
+    // ── DDHSN swarm + visibility ──────────────────────────────────────────
+    const swarmNet = new SwarmNetwork()
+    const visLayer = new VisibilityLayer()
+    const myNode   = new SwarmNode(username)
+    const { frequency: shipFreq } = swarmNet.createReality(myNode)
+    // Default: player is public
+    visLayer.setNode(username, VISIBILITY.PUBLIC)
+
+    // ── Network map button ────────────────────────────────────────────────
+    document.getElementById('nm-open-btn').addEventListener('click', () => {
+      openNetworkMap(swarmNet, visLayer, username)
+    })
 
     // Show room code toast for P2P
     if (mp.mode === 'p2p') {

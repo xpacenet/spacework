@@ -342,6 +342,79 @@
         background: #000;
       }
 
+      /* ── NETWORK MAP OVERLAY ─────────────────────────────────────────── */
+      #network-map-overlay {
+        position: fixed; inset: 0; z-index: 40;
+        background: rgba(0,2,14,0.93);
+        backdrop-filter: blur(14px);
+        display: flex; flex-direction: column;
+        opacity: 0; pointer-events: none;
+        transition: opacity 0.25s ease;
+      }
+      #network-map-overlay.visible { opacity: 1; pointer-events: all; }
+
+      .nm-bar {
+        flex-shrink: 0;
+        height: 52px; display: flex; align-items: center; gap: 12px;
+        padding: 0 20px;
+        background: rgba(0,5,25,0.8);
+        border-bottom: 1px solid rgba(255,255,255,0.07);
+      }
+      .nm-title { font-size: 0.85rem; font-weight: 700; letter-spacing: 0.12em; color: #fff; flex:1; }
+      .nm-filters { display: flex; gap: 6px; }
+      .nm-filter {
+        background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+        color: rgba(255,255,255,0.55); padding: 4px 12px; border-radius: 20px;
+        font-size: 0.72rem; font-weight: 600; cursor: pointer; font-family: inherit;
+        transition: all 0.15s;
+      }
+      .nm-filter.active, .nm-filter:hover {
+        background: rgba(80,150,255,0.18); border-color: rgba(80,150,255,0.4); color: #fff;
+      }
+      #nm-close {
+        background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.14);
+        color: rgba(255,255,255,0.8); padding: 6px 16px; border-radius: 8px;
+        font-size: 0.8rem; font-weight: 600; cursor: pointer; font-family: inherit;
+        transition: all 0.15s;
+      }
+      #nm-close:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
+      .nm-body { flex: 1; display: flex; overflow: hidden; }
+      #network-map-canvas { flex: 1; display: block; cursor: grab; }
+      #network-map-canvas:active { cursor: grabbing; }
+
+      #nm-node-panel {
+        width: 220px; flex-shrink: 0;
+        background: rgba(0,5,25,0.7);
+        border-left: 1px solid rgba(255,255,255,0.07);
+        padding: 20px 16px;
+        font-size: 0.8rem;
+      }
+      .nm-panel-title { font-weight: 700; font-size: 0.9rem; color: #fff; margin-bottom: 14px; }
+      .nm-panel-row {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06);
+        color: rgba(255,255,255,0.55);
+      }
+      .nm-panel-row span:last-child { color: #fff; font-weight: 600; }
+      .nm-badge { padding: 2px 8px; border-radius: 10px; font-size: 0.68rem; font-weight: 700; }
+      .nm-badge-public  { background: rgba(68,136,255,0.2);  color: #4488ff; }
+      .nm-badge-invite  { background: rgba(255,170,0,0.2);   color: #ffaa00; }
+      .nm-badge-private { background: rgba(100,100,140,0.2); color: #8888aa; }
+      .nm-panel-bridge  { margin-top: 12px; color: #ffcc00; font-size: 0.78rem; }
+      .nm-panel-blurred { color: rgba(255,255,255,0.4); text-align: center; padding-top: 20px; line-height: 1.6; }
+
+      /* HUD network map button */
+      #nm-open-btn {
+        position: absolute; top: 56px; right: 20px;
+        background: rgba(0,10,40,0.8); border: 1px solid rgba(100,150,255,0.3);
+        color: rgba(255,255,255,0.8); padding: 6px 14px; border-radius: 8px;
+        font-size: 0.75rem; font-weight: 600; cursor: pointer; font-family: inherit;
+        pointer-events: all; transition: all 0.15s;
+        letter-spacing: 0.05em;
+      }
+      #nm-open-btn:hover { background: rgba(60,100,220,0.3); border-color: #4466ff; color: #fff; }
+
       /* ── ROOM CODE BANNER (P2P) ──────────────────────────────────────── */
       #room-code-banner {
         position: fixed; top: 72px; left: 50%; transform: translateX(-50%);
@@ -482,6 +555,9 @@
         <canvas id="minimap-canvas"></canvas>
       </div>
 
+      <!-- Network map button -->
+      <button id="nm-open-btn">🌐 Network</button>
+
       <!-- Mode badge -->
       <div id="mode-badge">🎮 EXPLORE</div>
 
@@ -511,6 +587,24 @@
         <div class="hint-row"><span class="key">E</span>&nbsp; Open nearby screen</div>
         <div class="hint-row"><span class="key">R</span>&nbsp; Respawn at Bridge</div>
         <div class="hint-row"><span class="key">ESC</span>&nbsp; Release cursor</div>
+      </div>
+    </div>
+
+    <!-- NETWORK MAP OVERLAY -->
+    <div id="network-map-overlay" tabindex="-1">
+      <div class="nm-bar">
+        <span class="nm-title">🌐 NETWORK MAP</span>
+        <div class="nm-filters">
+          <button class="nm-filter active" data-vis="all">All</button>
+          <button class="nm-filter" data-vis="public">Public</button>
+          <button class="nm-filter" data-vis="invite">Invite-only</button>
+          <button class="nm-filter" data-vis="private">Private</button>
+        </div>
+        <button id="nm-close">✕ Close</button>
+      </div>
+      <div class="nm-body">
+        <canvas id="network-map-canvas"></canvas>
+        <div id="nm-node-panel"></div>
       </div>
     </div>
 
