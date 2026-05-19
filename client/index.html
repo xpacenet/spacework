@@ -257,6 +257,36 @@
       }
       .fade-in { animation: fadeIn 0.5s ease forwards; }
 
+      /* ── CONNECTION MODE SELECTOR ────────────────────────────────────── */
+      .connect-box {
+        width: 100%;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .connect-tabs {
+        display: flex; border-bottom: 1px solid rgba(255,255,255,0.08);
+      }
+      .connect-tab {
+        flex: 1; padding: 9px 0;
+        background: transparent; border: none; cursor: pointer;
+        font-family: inherit; font-size: 0.8rem; font-weight: 600;
+        color: rgba(255,255,255,0.4); letter-spacing: 0.05em;
+        transition: all 0.2s;
+      }
+      .connect-tab.active {
+        color: #fff;
+        background: rgba(255,255,255,0.06);
+      }
+      .connect-tab:first-child { border-right: 1px solid rgba(255,255,255,0.08); }
+      .connect-panel { padding: 12px 14px 10px; }
+      .connect-panel .lobby-input { margin-bottom: 6px; }
+      .connect-note {
+        font-size: 0.7rem; color: rgba(255,255,255,0.3);
+        line-height: 1.4; margin: 0;
+      }
+
       /* ── SCREEN OVERLAY ───────────────────────────────────────────────── */
       #screen-overlay {
         position: fixed; inset: 0; z-index: 50;
@@ -312,6 +342,43 @@
         background: #000;
       }
 
+      /* ── ROOM CODE BANNER (P2P) ──────────────────────────────────────── */
+      #room-code-banner {
+        position: fixed; top: 72px; left: 50%; transform: translateX(-50%);
+        z-index: 30; pointer-events: all;
+        background: rgba(0,5,20,0.92);
+        border: 1px solid rgba(255,200,0,0.35);
+        border-radius: 14px; padding: 14px 20px 10px;
+        backdrop-filter: blur(12px);
+        min-width: 300px; text-align: center;
+        animation: fadeIn 0.3s ease forwards;
+      }
+      .rcb-inner {
+        display: flex; align-items: center; gap: 10px; justify-content: center;
+        margin-bottom: 6px;
+      }
+      .rcb-label {
+        font-size: 0.72rem; color: rgba(255,200,0,0.7);
+        font-weight: 600; letter-spacing: 0.08em;
+      }
+      .rcb-code {
+        font-size: 1.3rem; font-weight: 800; letter-spacing: 0.22em;
+        color: #ffcc00; font-family: monospace;
+        text-shadow: 0 0 16px rgba(255,200,0,0.6);
+      }
+      .rcb-copy, .rcb-close {
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.15);
+        color: rgba(255,255,255,0.8);
+        padding: 3px 10px; border-radius: 6px;
+        font-size: 0.72rem; cursor: pointer;
+        font-family: inherit; transition: all 0.15s;
+      }
+      .rcb-copy:hover, .rcb-close:hover { background: rgba(255,255,255,0.15); color: #fff; }
+      .rcb-note {
+        font-size: 0.7rem; color: rgba(255,255,255,0.35); margin: 0;
+      }
+
       /* ── SCREEN PROXIMITY HINT ────────────────────────────────────────── */
       #screen-hint {
         position: fixed;
@@ -352,7 +419,31 @@
           <span class="zone-chip lab">Lab</span>
           <span class="zone-chip lounge">Lounge</span>
         </div>
-        <input class="lobby-input" id="username" type="text" placeholder="Enter your name" maxlength="20" autofocus />
+
+        <!-- Connection mode -->
+        <div class="connect-box">
+          <div class="connect-tabs">
+            <button class="connect-tab active" data-mode="p2p">⚡ P2P</button>
+            <button class="connect-tab" data-mode="provider">🔌 Provider</button>
+          </div>
+
+          <div class="connect-panel" id="panel-p2p">
+            <input class="lobby-input" id="room-code" type="text"
+              placeholder="Room code — leave blank to create one"
+              maxlength="7" autocomplete="off"
+              style="letter-spacing:0.12em;text-transform:uppercase;" />
+            <p class="connect-note">No server needed. Share the room code with teammates.</p>
+          </div>
+
+          <div class="connect-panel" id="panel-provider" style="display:none;">
+            <input class="lobby-input" id="server-url" type="text"
+              placeholder="Server URL"
+              value="http://localhost:3001" />
+            <p class="connect-note">Connect to a SpaceWork server — self-hosted or community.</p>
+          </div>
+        </div>
+
+        <input class="lobby-input" id="username" type="text" placeholder="Your name" maxlength="20" autofocus />
         <button class="lobby-btn" id="enter-btn">Board the Ship →</button>
       </div>
     </div>
