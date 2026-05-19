@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { initScene }         from './scene/index.js'
 import { buildScreens }      from './scene/screens.js'
 import { initPlayer }        from './player/index.js'
-import { initMultiplayer }   from './multiplayer/index.js'
+import { generateRoomCode }  from './multiplayer/index.js'
 import { initScreenOverlay } from './ui/screenOverlay.js'
 import { SwarmNetwork, SwarmNode } from './network/swarm.js'
 import { VisibilityLayer, VISIBILITY } from './network/visibility.js'
@@ -150,42 +150,42 @@ function startBoarding() {
     // ── Player ────────────────────────────────────────────────────────────
     const player = initPlayer(scene, camera, renderer, updateZoneUI)
 
-    // ── Multiplayer ───────────────────────────────────────────────────────
-    const mp = initMultiplayer(connectMode, config, scene, player, username, hud)
+    // ── Player ─────────────────────────────────────────────────────────────
+    // (already declared above — kept here for clarity of insertion point)
 
-    // ── Sync peer avatars (BroadcastChannel — instant for same-browser tabs) ─
-    const _localAvatars = {}
+    // ── Peer avatars — single system driven by spaceSync ─────────────────
+    // spaceSync detects peers via BroadcastChannel (local, instant) and
+    // Trystero WebRTC (remote, seconds). Both fire the same events here.
+    const _avatars = new Map()   // peerId → THREE.Group
 
     spaceSync.addEventListener('peer:join', e => {
-      const { peerId, username: peerName, source } = e.detail
-      if (source !== 'local') return   // Trystero peers handled by initP2P
-      if (_localAvatars[peerId]) return
+      const { peerId, username: peerName } = e.detail
+      if (_avatars.has(peerId)) return
       const av = _makeAvatar(peerName)
       scene.add(av)
-      _localAvatars[peerId] = av
-      _updateOnlineCount(hud, Object.keys(_localAvatars).length + 1)
+      _avatars.set(peerId, av)
+      _updateOnlineCount(hud, _avatars.size + 1)
     })
 
     spaceSync.addEventListener('peer:move', e => {
       const { peerId, pos } = e.detail
-      const av = _localAvatars[peerId]
-      if (!av) return
-      av.position.lerp(new THREE.Vector3(pos.x, pos.y, pos.z), 0.3)
+      const av = _avatars.get(peerId)
+      if (av) av.position.lerp(new THREE.Vector3(pos.x, pos.y, pos.z), 0.3)
     })
 
     spaceSync.addEventListener('peer:leave', e => {
-      const { peerId } = e.detail
-      if (_localAvatars[peerId]) {
-        scene.remove(_localAvatars[peerId])
-        delete _localAvatars[peerId]
-        _updateOnlineCount(hud, Object.keys(_localAvatars).length + 1)
+      const av = _avatars.get(e.detail.peerId)
+      if (av) {
+        scene.remove(av)
+        _avatars.delete(e.detail.peerId)
+        _updateOnlineCount(hud, _avatars.size + 1)
       }
     })
 
-    // Broadcast own position every 50ms to local tabs
+    // Broadcast own position every 50ms
     setInterval(() => {
       const pos = player.getPosition()
-      spaceSync.broadcastMove(pos.x, pos.y, pos.z)
+      spaceSync.move(pos.x, pos.y, pos.z)
     }, 50)
 
     // ── DDHSN swarm + visibility ──────────────────────────────────────────
@@ -193,18 +193,12 @@ function startBoarding() {
     const visLayer = new VisibilityLayer()
     const myNode   = new SwarmNode(username)
     const { frequency: shipFreq } = swarmNet.createReality(myNode)
-    // Default: player is public
     visLayer.setNode(username, VISIBILITY.PUBLIC)
 
     // ── Network map button ────────────────────────────────────────────────
     document.getElementById('nm-open-btn').addEventListener('click', () => {
       openNetworkMap(swarmNet, visLayer, username)
     })
-
-    // Show room code only when using a custom private room
-    if (mp.mode === 'p2p' && mp.roomCode !== 'SW-OPEN-v1') {
-      showRoomCodeBanner(mp.roomCode)
-    }
 
     // ── Screen proximity + E key ──────────────────────────────────────────
     const hintEl   = document.getElementById('screen-hint')

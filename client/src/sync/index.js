@@ -1,21 +1,26 @@
 /**
- * SpaceSync — unified sync layer.
+ * SpaceSync — the single multiplayer backend.
  *
- * Tier 1 — LocalSync  (BroadcastChannel): same browser, instant, zero deps
- * Tier 2 — RemoteSync (Trystero WebRTC):  cross-machine, BitTorrent DHT signaling
+ * Two detection tiers, one event surface:
  *
- * Both tiers fire the same events so the rest of the app doesn't care which
- * transport delivered a message.
+ *   LocalSync  (BroadcastChannel) — same browser, instant, zero deps
+ *   RemoteSync (Trystero WebRTC)  — cross-machine, BitTorrent DHT signaling
  *
- * Events emitted:
- *   peer:join    { peerId, username, source }   — a peer appeared
- *   peer:leave   { peerId, source }             — a peer left
- *   peer:move    { peerId, pos }                — position update
- *   commit       { commit }                     — world history commit from peer
- *   status       { local, remote, peerCount }   — connectivity update
+ * Detection protocol for BOTH tiers:
+ *   1. You board → send HELLO with your username
+ *   2. Every live peer hears it → replies with their own HELLO
+ *   3. You hear their reply → now you know each other ← the key step that was missing
+ *   4. MOVE messages keep avatar positions in sync (50ms interval)
+ *   5. BYE / disconnect removes the peer
+ *
+ * Events emitted (CustomEvent on this EventTarget):
+ *   peer:join   detail: { peerId, username, source }   — someone appeared
+ *   peer:leave  detail: { peerId }                     — someone left
+ *   peer:move   detail: { peerId, pos:{x,y,z} }        — position update
+ *   status      detail: { peerCount }                  — count changed
  */
 
-import { LocalSync }  from './local.js'
+import { LocalSync }          from './local.js'
 import { RemoteSync, selfId } from './remote.js'
 
 export { selfId }
@@ -23,94 +28,88 @@ export { selfId }
 export class SpaceSync extends EventTarget {
   #local   = null
   #remote  = null
-  #peers   = new Map()   // peerId → { username, source }
+  #peers   = new Map()   // peerId → { peerId, username, source }
   #started = false
 
   get peers()     { return [...this.#peers.values()] }
   get peerCount() { return this.#peers.size }
   get id()        { return selfId }
 
-  /**
-   * Start both sync tiers.
-   * @param {string} username
-   */
   async start(username) {
     if (this.#started) return
     this.#started = true
 
-    // ── Tier 1: local tabs ─────────────────────────────────────────────────
+    // ── Tier 1: same-browser tabs via BroadcastChannel ────────────────────
     this.#local = new LocalSync(username)
 
     this.#local.on('HELLO', ({ from, username: u }) => {
-      this.#peers.set(from, { peerId: from, username: u, source: 'local' })
-      this.#emit('peer:join', { peerId: from, username: u, source: 'local' })
-      this.#emitStatus()
+      if (this.#peers.has(from)) return    // already know this peer
+      this.#addPeer(from, u, 'local')
     })
-    this.#local.on('BYE', ({ from }) => {
-      this.#peers.delete(from)
-      this.#emit('peer:leave', { peerId: from, source: 'local' })
-      this.#emitStatus()
+
+    this.#local.on('BYE', ({ from }) => this.#removePeer(from))
+
+    this.#local.on('MOVE', ({ from, pos }) => {
+      this.#emit('peer:move', { peerId: from, pos })
     })
-    this.#local.on('MOVE',   ({ from, pos })    => this.#emit('peer:move',  { peerId: from, pos }))
-    this.#local.on('COMMIT', ({ from, commit }) => this.#emit('commit',     { commit, from }))
 
-    this.#local.start()
+    this.#local.on('COMMIT', ({ from, commit }) => {
+      this.#emit('commit', { from, commit })
+    })
 
-    // ── Tier 2: remote peers ───────────────────────────────────────────────
+    this.#local.start()    // sends HELLO; every live tab replies automatically
+
+    // ── Tier 2: cross-machine via Trystero WebRTC ─────────────────────────
     this.#remote = new RemoteSync(username)
 
-    this.#remote.on('HELLO', ({ peerId, username: u }) => {
-      if (!this.#peers.has(peerId)) {
-        this.#peers.set(peerId, { peerId, username: u, source: 'remote' })
-        this.#emit('peer:join', { peerId, username: u, source: 'remote' })
-        this.#emitStatus()
-      }
+    this.#remote.on('HELLO', ({ from, username: u }) => {
+      if (this.#peers.has(from)) return
+      this.#addPeer(from, u, 'remote')
     })
-    this.#remote.on('PEER_LEAVE', ({ peerId }) => {
-      this.#peers.delete(peerId)
-      this.#emit('peer:leave', { peerId, source: 'remote' })
-      this.#emitStatus()
+
+    this.#remote.on('PEER_LEAVE', ({ from }) => this.#removePeer(from))
+
+    this.#remote.on('MOVE', ({ from, pos }) => {
+      this.#emit('peer:move', { peerId: from, pos })
     })
-    this.#remote.on('MOVE',   ({ peerId, pos })    => this.#emit('peer:move',  { peerId, pos }))
-    this.#remote.on('COMMIT', ({ peerId, commit }) => this.#emit('commit',     { commit, from: peerId }))
 
-    await this.#remote.start()
-
-    this.#emitStatus()
+    await this.#remote.start()    // joins SW-OPEN-v1; sends intro to anyone already there
   }
 
   stop() {
     this.#local?.stop()
     this.#remote?.stop()
+    this.#peers.clear()
     this.#started = false
   }
 
-  /** Broadcast a world commit to all peers. */
-  broadcastCommit(commitData) {
-    this.#local?.sendCommit(commitData)
-    this.#remote?.sendCommit(commitData)
+  move(x, y, z) {
+    this.#local?.move(x, y, z)
+    this.#remote?.move(x, y, z)
   }
 
-  /** Broadcast position update. */
-  broadcastMove(x, y, z) {
-    this.#local?.sendMove(x, y, z)
-    this.#remote?.sendMove(x, y, z)
+  broadcastCommit(data) {
+    this.#local?.commit(data)
   }
 
-  // ── internal ───────────────────────────────────────────────────────────
+  // ── internal ───────────────────────────────────────────────────────────────
+
+  #addPeer(peerId, username, source) {
+    this.#peers.set(peerId, { peerId, username, source })
+    this.#emit('peer:join',  { peerId, username, source })
+    this.#emit('status',     { peerCount: this.#peers.size })
+  }
+
+  #removePeer(peerId) {
+    if (!this.#peers.has(peerId)) return
+    this.#peers.delete(peerId)
+    this.#emit('peer:leave', { peerId })
+    this.#emit('status',     { peerCount: this.#peers.size })
+  }
 
   #emit(type, detail) {
     this.dispatchEvent(new CustomEvent(type, { detail }))
   }
-
-  #emitStatus() {
-    this.#emit('status', {
-      local:     this.#local  !== null,
-      remote:    this.#remote !== null,
-      peerCount: this.#peers.size,
-    })
-  }
 }
 
-// Singleton — one sync instance per tab
 export const spaceSync = new SpaceSync()

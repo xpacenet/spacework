@@ -1,75 +1,71 @@
 /**
  * RemoteSync — cross-machine P2P via Trystero (BitTorrent DHT signaling).
  *
- * No server needed. Trystero uses BitTorrent DHT as a free signaling channel
- * then establishes direct WebRTC connections between browsers.
- *
- * Everyone who joins the same APP_ID is in the same swarm automatically.
+ * Same room as the global lobby so all peers land in the same space.
+ * Emits the same event shape as LocalSync so SpaceSync can treat both
+ * sources identically.
  */
 
 import { joinRoom, selfId } from '@trystero-p2p/torrent'
 
-const APP_ID = 'spacework-universe-v1'
-
 export { selfId }
+
+const APP_ID   = 'spacework-v1'
+const ROOM_ID  = 'SW-OPEN-v1'        // global open room — everyone lands here
 
 export class RemoteSync {
   #room     = null
   #username = null
   #handlers = {}
 
-  // Trystero actions
-  #sendHello   = null; #onHello   = null
-  #sendBye     = null; #onBye     = null
-  #sendMove    = null; #onMove    = null
-  #sendCommit  = null; #onCommit  = null
+  #sendIntro = null; #onIntro = null
+  #sendMove  = null; #onMove  = null
+  #sendBye   = null; #onBye   = null
 
   constructor(username) {
     this.#username = username
   }
 
   async start() {
-    this.#room = joinRoom({ appId: APP_ID }, APP_ID)
+    this.#room = joinRoom({ appId: APP_ID }, ROOM_ID)
 
-    ;[this.#sendHello,  this.#onHello]  = this.#room.makeAction('hello')
-    ;[this.#sendBye,    this.#onBye]    = this.#room.makeAction('bye')
-    ;[this.#sendMove,   this.#onMove]   = this.#room.makeAction('move')
-    ;[this.#sendCommit, this.#onCommit] = this.#room.makeAction('commit')
+    ;[this.#sendIntro, this.#onIntro] = this.#room.makeAction('intro')
+    ;[this.#sendMove,  this.#onMove]  = this.#room.makeAction('move')
+    ;[this.#sendBye,   this.#onBye]   = this.#room.makeAction('bye')
 
-    // Peer joins — send our intro
+    // New peer appears — send them our intro immediately
     this.#room.onPeerJoin(peerId => {
-      this.#sendHello({ username: this.#username }, peerId)
-      this.#fire('PEER_JOIN', { peerId })
+      this.#sendIntro({ username: this.#username }, peerId)
     })
 
+    // Peer disconnects — fire leave
     this.#room.onPeerLeave(peerId => {
-      this.#fire('PEER_LEAVE', { peerId })
-      this.#fire('BYE', { from: peerId })
+      this.#fire('PEER_LEAVE', { from: peerId })
     })
 
-    this.#onHello((data, peerId) => {
-      this.#fire('HELLO', { ...data, peerId })
-      // Reply so they know about us too
-      this.#sendHello({ username: this.#username }, peerId)
+    // Receive intro — add to peers and reply so they know us too
+    this.#onIntro(({ username }, peerId) => {
+      this.#fire('HELLO', { from: peerId, username })
+      // Reply with our intro so they get our name
+      this.#sendIntro({ username: this.#username }, peerId)
     })
 
-    this.#onBye((data, peerId) => this.#fire('BYE', { ...data, peerId }))
+    this.#onMove(({ pos }, peerId) => {
+      this.#fire('MOVE', { from: peerId, pos })
+    })
 
-    this.#onMove((data, peerId) => this.#fire('MOVE', { ...data, peerId }))
-
-    this.#onCommit((data, peerId) => this.#fire('COMMIT', { ...data, peerId }))
+    this.#onBye((_, peerId) => {
+      this.#fire('PEER_LEAVE', { from: peerId })
+    })
   }
 
   stop() {
-    if (this.#room) this.#room.leave()
+    this.#sendBye?.()
+    this.#room?.leave()
   }
 
-  sendCommit(commitData) {
-    if (this.#sendCommit) this.#sendCommit({ commit: commitData })
-  }
-
-  sendMove(x, y, z) {
-    if (this.#sendMove) this.#sendMove({ pos: { x, y, z } })
+  move(x, y, z) {
+    this.#sendMove?.({ pos: { x, y, z } })
   }
 
   on(type, cb) {
@@ -78,10 +74,7 @@ export class RemoteSync {
     return () => { this.#handlers[type] = this.#handlers[type].filter(h => h !== cb) }
   }
 
-  // ── internal ──────────────────────────────────────────────────────────────
-
   #fire(type, payload) {
-    const handlers = this.#handlers[type]
-    if (handlers) handlers.forEach(cb => cb(payload))
+    this.#handlers[type]?.forEach(cb => cb(payload))
   }
 }
