@@ -229,6 +229,42 @@ export class WorldHistory {
   }
 
   /**
+   * Apply an externally received commit (e.g. from a remote IPFS peer).
+   * The commit's hash is trusted as received — its parent must already exist.
+   * If the incoming commit extends the known chain, HEAD advances.
+   * If it branches (fork), it is stored but HEAD stays on the longest chain.
+   *
+   * @param {object} data  plain object with { hash, parentHash, authorId, message, timestamp, changes }
+   * @returns {WorldCommit}
+   */
+  applyExternal(data) {
+    if (this.#commits.has(data.hash)) return this.#commits.get(data.hash)
+
+    if (data.parentHash && !this.#commits.has(data.parentHash)) {
+      throw new Error(`missing parent ${data.parentHash} — cannot apply ${data.hash}`)
+    }
+
+    const wc = new WorldCommit(
+      data.parentHash,
+      data.authorId,
+      data.changes,
+      data.message,
+      data.timestamp,
+    )
+
+    // The hash we recomputed may differ if the remote used different timing
+    // In that case, store under the remote's declared hash (trust the content)
+    this.#commits.set(data.hash, wc)
+
+    // Advance HEAD only if this extends our current chain
+    if (data.parentHash === this.#head) {
+      this.#head = data.hash
+    }
+
+    return wc
+  }
+
+  /**
    * Verify the entire commit chain integrity.
    * Returns { valid: boolean, broken?: string } where broken is the first bad hash.
    */

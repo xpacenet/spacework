@@ -7,6 +7,35 @@ import { initScreenOverlay } from './ui/screenOverlay.js'
 import { SwarmNetwork, SwarmNode } from './network/swarm.js'
 import { VisibilityLayer, VISIBILITY } from './network/visibility.js'
 import { openNetworkMap }    from './ui/networkMap.js'
+import { createSpaceNode, onNodeStatus, SpaceDiscovery } from './ipfs/index.js'
+import { WorldHistory }      from './universe/index.js'
+
+// ── IPFS node boots immediately — before the lobby even loads ─────────────
+// The browser IS the backend. No server required.
+const _worldHistory = new WorldHistory()
+let   _ipfsNode     = null
+let   _discovery    = null
+
+onNodeStatus(({ status, peerId }) => {
+  const dot = document.getElementById('ipfs-dot')
+  const lbl = document.getElementById('ipfs-label')
+  if (!dot) return
+  if (status === 'starting') { dot.className = 'ipfs-dot yellow'; lbl.textContent = 'Connecting…' }
+  if (status === 'ready')    { dot.className = 'ipfs-dot green';  lbl.textContent = `IPFS · ${peerId.slice(-6)}` }
+  if (status === 'error')    { dot.className = 'ipfs-dot red';    lbl.textContent = 'Offline' }
+  if (status === 'peer:connect') {
+    const cnt = document.getElementById('ipfs-peers')
+    if (cnt) cnt.textContent = `${(parseInt(cnt.textContent)||0)+1} peers`
+  }
+})
+
+createSpaceNode()
+  .then(({ libp2p, peerId }) => {
+    _ipfsNode = libp2p
+    // Discovery starts after user enters a name (username not known yet)
+    window._ipfsReady = { libp2p, peerId }
+  })
+  .catch(err => console.warn('[IPFS] node failed to start:', err))
 
 // ── DOM refs ──────────────────────────────────────────────────────────────
 const lobby        = document.getElementById('lobby')
@@ -66,6 +95,16 @@ function startBoarding() {
   window._spaceUsername = username
   lobby.style.display = 'none'
   loading.classList.add('visible')
+
+  // ── Start IPFS discovery now that we have a username ───────────────────
+  if (window._ipfsReady && !_discovery) {
+    const { libp2p, peerId } = window._ipfsReady
+    _discovery = new SpaceDiscovery(libp2p, peerId, username)
+    _discovery.start()
+    // Expose for console debugging: window.discovery.peers, etc.
+    window._discovery = _discovery
+    window._worldHistory = _worldHistory
+  }
 
   const { scene, camera, renderer, onShipLoaded } = initScene(
     (pct, msg) => {
