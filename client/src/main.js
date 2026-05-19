@@ -7,35 +7,37 @@ import { initScreenOverlay } from './ui/screenOverlay.js'
 import { SwarmNetwork, SwarmNode } from './network/swarm.js'
 import { VisibilityLayer, VISIBILITY } from './network/visibility.js'
 import { openNetworkMap }    from './ui/networkMap.js'
-import { createSpaceNode, onNodeStatus, SpaceDiscovery } from './ipfs/index.js'
+import { spaceSync, selfId } from './sync/index.js'
 import { WorldHistory }      from './universe/index.js'
 
-// ── IPFS node boots immediately — before the lobby even loads ─────────────
-// The browser IS the backend. No server required.
+// ── World history — shared, updated by peers ──────────────────────────────
 const _worldHistory = new WorldHistory()
-let   _ipfsNode     = null
-let   _discovery    = null
+window._worldHistory = _worldHistory
 
-onNodeStatus(({ status, peerId }) => {
-  const dot = document.getElementById('ipfs-dot')
-  const lbl = document.getElementById('ipfs-label')
-  if (!dot) return
-  if (status === 'starting') { dot.className = 'ipfs-dot yellow'; lbl.textContent = 'Connecting…' }
-  if (status === 'ready')    { dot.className = 'ipfs-dot green';  lbl.textContent = `IPFS · ${peerId.slice(-6)}` }
-  if (status === 'error')    { dot.className = 'ipfs-dot red';    lbl.textContent = 'Offline' }
-  if (status === 'peer:connect') {
-    const cnt = document.getElementById('ipfs-peers')
-    if (cnt) cnt.textContent = `${(parseInt(cnt.textContent)||0)+1} peers`
-  }
-})
-
-createSpaceNode()
-  .then(({ libp2p, peerId }) => {
-    _ipfsNode = libp2p
-    // Discovery starts after user enters a name (username not known yet)
-    window._ipfsReady = { libp2p, peerId }
+// ── Sync status indicator (updates before lobby + in-game) ───────────────
+function updateSyncDot({ peerCount } = {}) {
+  document.querySelectorAll('.ipfs-dot').forEach(dot => {
+    dot.className = 'ipfs-dot green'
   })
-  .catch(err => console.warn('[IPFS] node failed to start:', err))
+  document.querySelectorAll('#ipfs-label').forEach(el => {
+    el.textContent = `P2P · ${selfId.slice(-6)}`
+  })
+  if (peerCount !== undefined) {
+    document.querySelectorAll('#ipfs-peers').forEach(el => {
+      el.textContent = peerCount > 0 ? `${peerCount} peer${peerCount !== 1 ? 's' : ''}` : ''
+    })
+  }
+}
+
+// Node ID is known immediately (no async startup needed)
+updateSyncDot({ peerCount: 0 })
+
+spaceSync.addEventListener('status', e => updateSyncDot(e.detail))
+
+// Apply incoming world commits from peers
+spaceSync.addEventListener('commit', e => {
+  try { _worldHistory.applyExternal(e.detail.commit) } catch { /* already have it */ }
+})
 
 // ── DOM refs ──────────────────────────────────────────────────────────────
 const lobby        = document.getElementById('lobby')
@@ -96,15 +98,9 @@ function startBoarding() {
   lobby.style.display = 'none'
   loading.classList.add('visible')
 
-  // ── Start IPFS discovery now that we have a username ───────────────────
-  if (window._ipfsReady && !_discovery) {
-    const { libp2p, peerId } = window._ipfsReady
-    _discovery = new SpaceDiscovery(libp2p, peerId, username)
-    _discovery.start()
-    // Expose for console debugging: window.discovery.peers, etc.
-    window._discovery = _discovery
-    window._worldHistory = _worldHistory
-  }
+  // ── Start P2P sync now that we have a username ────────────────────────
+  spaceSync.start(username)
+  window._sync = spaceSync
 
   const { scene, camera, renderer, onShipLoaded } = initScene(
     (pct, msg) => {
@@ -157,6 +153,41 @@ function startBoarding() {
     // ── Multiplayer ───────────────────────────────────────────────────────
     const mp = initMultiplayer(connectMode, config, scene, player, username, hud)
 
+    // ── Sync peer avatars (BroadcastChannel — instant for same-browser tabs) ─
+    const _localAvatars = {}
+
+    spaceSync.addEventListener('peer:join', e => {
+      const { peerId, username: peerName, source } = e.detail
+      if (source !== 'local') return   // Trystero peers handled by initP2P
+      if (_localAvatars[peerId]) return
+      const av = _makeAvatar(peerName)
+      scene.add(av)
+      _localAvatars[peerId] = av
+      _updateOnlineCount(hud, Object.keys(_localAvatars).length + 1)
+    })
+
+    spaceSync.addEventListener('peer:move', e => {
+      const { peerId, pos } = e.detail
+      const av = _localAvatars[peerId]
+      if (!av) return
+      av.position.lerp(new THREE.Vector3(pos.x, pos.y, pos.z), 0.3)
+    })
+
+    spaceSync.addEventListener('peer:leave', e => {
+      const { peerId } = e.detail
+      if (_localAvatars[peerId]) {
+        scene.remove(_localAvatars[peerId])
+        delete _localAvatars[peerId]
+        _updateOnlineCount(hud, Object.keys(_localAvatars).length + 1)
+      }
+    })
+
+    // Broadcast own position every 50ms to local tabs
+    setInterval(() => {
+      const pos = player.getPosition()
+      spaceSync.broadcastMove(pos.x, pos.y, pos.z)
+    }, 50)
+
     // ── DDHSN swarm + visibility ──────────────────────────────────────────
     const swarmNet = new SwarmNetwork()
     const visLayer = new VisibilityLayer()
@@ -170,8 +201,8 @@ function startBoarding() {
       openNetworkMap(swarmNet, visLayer, username)
     })
 
-    // Show room code toast for P2P
-    if (mp.mode === 'p2p') {
+    // Show room code only when using a custom private room
+    if (mp.mode === 'p2p' && mp.roomCode !== 'SW-OPEN-v1') {
       showRoomCodeBanner(mp.roomCode)
     }
 
@@ -203,6 +234,40 @@ function startBoarding() {
       }
     }, 150)
   })
+}
+
+// ── Shared avatar factory (used by both local and remote peer handlers) ───
+function _makeAvatar(name) {
+  const group   = new THREE.Group()
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x4488ff, roughness: 0.7 })
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xffbb88, roughness: 0.8 })
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.25, 0.8, 4, 8), bodyMat)
+  body.position.y = 0.9
+  group.add(body)
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 12), headMat)
+  head.position.y = 1.7
+  group.add(head)
+  const cvs = document.createElement('canvas')
+  cvs.width = 256; cvs.height = 64
+  const ctx = cvs.getContext('2d')
+  ctx.fillStyle = 'rgba(40,100,255,0.8)'
+  ctx.roundRect(0, 0, 256, 64, 12); ctx.fill()
+  ctx.fillStyle = '#fff'
+  ctx.font = 'bold 26px Inter,sans-serif'
+  ctx.textAlign = 'center'
+  ctx.fillText(name, 128, 42)
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(cvs), transparent: true,
+  }))
+  sprite.position.y = 2.15
+  sprite.scale.set(1.4, 0.35, 1)
+  group.add(sprite)
+  return group
+}
+
+function _updateOnlineCount(hud, count) {
+  const el = hud?.querySelector?.('#online-count')
+  if (el) el.textContent = `● ${count} aboard`
 }
 
 // ── Room code banner (P2P) ─────────────────────────────────────────────────

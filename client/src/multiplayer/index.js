@@ -7,6 +7,10 @@ import { initProvider }              from './provider.js'
 
 export { generateRoomCode }
 
+// The global open room — everyone with no specific code lands here.
+// Think of it as the public lobby of the universe.
+const GLOBAL_ROOM = 'SW-OPEN-v1'
+
 /**
  * @param {'p2p'|'provider'} mode
  * @param {object}  config    { roomCode? } for p2p | { serverUrl } for provider
@@ -18,7 +22,10 @@ export { generateRoomCode }
  */
 export function initMultiplayer(mode, config, scene, player, username, hud) {
   if (mode === 'p2p') {
-    const code = config.roomCode || generateRoomCode()
+    // Use typed room code if provided, otherwise everyone joins the global room
+    const code = (config.roomCode && config.roomCode.replace('-','').length === 6)
+      ? config.roomCode
+      : GLOBAL_ROOM
     initP2P(scene, player, username, hud, code)
     return { mode: 'p2p', roomCode: code }
   }
