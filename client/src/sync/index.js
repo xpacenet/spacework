@@ -1,23 +1,17 @@
 /**
  * SpaceSync — the single multiplayer backend.
  *
- * Two detection tiers, one event surface:
+ * Two transport tiers, one event surface:
  *
- *   LocalSync  (BroadcastChannel) — same browser, instant, zero deps
- *   RemoteSync (Trystero WebRTC)  — cross-machine, BitTorrent DHT signaling
- *
- * Detection protocol for BOTH tiers:
- *   1. You board → send HELLO with your username
- *   2. Every live peer hears it → replies with their own HELLO
- *   3. You hear their reply → now you know each other ← the key step that was missing
- *   4. MOVE messages keep avatar positions in sync (50ms interval)
- *   5. BYE / disconnect removes the peer
+ *   LocalSync  (BroadcastChannel + localStorage) — same browser, instant
+ *   RemoteSync (Trystero WebRTC)                 — cross-machine, BitTorrent DHT
  *
  * Events emitted (CustomEvent on this EventTarget):
- *   peer:join   detail: { peerId, username, source }   — someone appeared
- *   peer:leave  detail: { peerId }                     — someone left
- *   peer:move   detail: { peerId, pos:{x,y,z} }        — position update
- *   status      detail: { peerCount }                  — count changed
+ *   peer:join   detail: { peerId, username, source }
+ *   peer:leave  detail: { peerId }
+ *   peer:move   detail: { peerId, pos:{x,y,z,ry} }
+ *   chat        detail: { from, username, text, ts }
+ *   status      detail: { peerCount }
  */
 
 import { LocalSync }          from './local.js'
@@ -31,27 +25,33 @@ export class SpaceSync extends EventTarget {
   #peers   = new Map()   // peerId → { peerId, username, source }
   #started = false
 
+  /** Username stored so sendChat can include it without needing a parameter. */
+  #username = ''
+
   get peers()     { return [...this.#peers.values()] }
   get peerCount() { return this.#peers.size }
   get id()        { return selfId }
 
   async start(username) {
     if (this.#started) return
-    this.#started = true
+    this.#started  = true
+    this.#username = username
 
     // ── Tier 1: same-browser tabs via BroadcastChannel ────────────────────
     this.#local = new LocalSync(username)
 
-    this.#local.on('PEER', ({ from, username: u }) => {
+    this.#local.on('PEER',   ({ from, username: u }) => {
       if (this.#peers.has(from)) return
       this.#addPeer(from, u, 'local')
     })
+    this.#local.on('BYE',    ({ from })         => this.#removePeer(from))
+    this.#local.on('MOVE',   ({ from, pos })    => this.#emit('peer:move', { peerId: from, pos }))
+    this.#local.on('COMMIT', ({ from, commit }) => this.#emit('commit', { from, commit }))
+    this.#local.on('CHAT',   ({ from, username: u, text, ts }) => {
+      this.#emit('chat', { from, username: u, text, ts })
+    })
 
-    this.#local.on('BYE',    ({ from })        => this.#removePeer(from))
-    this.#local.on('MOVE',   ({ from, pos })   => this.#emit('peer:move', { peerId: from, pos }))
-    this.#local.on('COMMIT', ({ from, commit })=> this.#emit('commit', { from, commit }))
-
-    this.#local.start()    // sends HELLO; every live tab replies automatically
+    this.#local.start()
 
     // ── Tier 2: cross-machine via Trystero WebRTC ─────────────────────────
     this.#remote = new RemoteSync(username)
@@ -60,14 +60,15 @@ export class SpaceSync extends EventTarget {
       if (this.#peers.has(from)) return
       this.#addPeer(from, u, 'remote')
     })
-
     this.#remote.on('PEER_LEAVE', ({ from }) => this.#removePeer(from))
-
     this.#remote.on('MOVE', ({ from, pos }) => {
       this.#emit('peer:move', { peerId: from, pos })
     })
+    this.#remote.on('CHAT', ({ from, username: u, text, ts }) => {
+      this.#emit('chat', { from, username: u, text, ts })
+    })
 
-    await this.#remote.start()    // joins SW-OPEN-v1; sends intro to anyone already there
+    await this.#remote.start()
   }
 
   stop() {
@@ -84,6 +85,19 @@ export class SpaceSync extends EventTarget {
 
   broadcastCommit(data) {
     this.#local?.commit(data)
+  }
+
+  /**
+   * Broadcast a chat message to all peers (local tabs + remote machines).
+   * @param {string} text
+   */
+  sendChat(text) {
+    if (!text.trim()) return
+    const ts = Date.now()
+    // Fire locally so the sender sees their own message immediately
+    this.#emit('chat', { from: this.id, username: this.#username, text, ts })
+    this.#local?.chat(this.#username, text)
+    this.#remote?.chat(text)
   }
 
   // ── internal ───────────────────────────────────────────────────────────────

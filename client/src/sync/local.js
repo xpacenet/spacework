@@ -27,10 +27,13 @@ export class LocalSync {
   #hb       = null
   #scan     = null
 
+  constructor(username) {
+    this.#username = username || ''
+  }
+
   get id() { return this.#id }
 
-  start(username) {
-    this.#username = username
+  start() {
     this.#write()                                   // register immediately
     this.#hb   = setInterval(() => this.#write(),  HB_MS)
     this.#scan = setInterval(() => this.#poll(),   SCAN_MS)
@@ -40,6 +43,7 @@ export class LocalSync {
       if (!data || data.from === this.#id) return
       if (data.type === 'MOVE')   this.#fire('MOVE',   data)
       if (data.type === 'COMMIT') this.#fire('COMMIT', data)
+      if (data.type === 'CHAT')   this.#fire('CHAT',   data)
     }
   }
 
@@ -58,6 +62,10 @@ export class LocalSync {
 
   commit(data) {
     this.#ch?.postMessage({ type: 'COMMIT', from: this.#id, commit: data })
+  }
+
+  chat(username, text) {
+    this.#ch?.postMessage({ type: 'CHAT', from: this.#id, username, text, ts: Date.now() })
   }
 
   on(type, cb) {

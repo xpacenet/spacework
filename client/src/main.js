@@ -98,10 +98,6 @@ function startBoarding() {
   lobby.style.display = 'none'
   loading.classList.add('visible')
 
-  // ── Start P2P sync now that we have a username ────────────────────────
-  spaceSync.start(username)
-  window._sync = spaceSync
-
   const { scene, camera, renderer, onShipLoaded } = initScene(
     (pct, msg) => {
       loadFill.style.width = pct + '%'
@@ -185,12 +181,101 @@ function startBoarding() {
       }
     })
 
+    // Start sync only after listeners are ready — peers detected before this would fire into void
+    spaceSync.start(username)
+    window._sync = spaceSync
+
     // Broadcast own position + rotation every 50ms
     setInterval(() => {
       const pos = player.getPosition()
       const rot = player.getRotation()
       spaceSync.move(pos.x, pos.y, pos.z, rot.y)
     }, 50)
+
+    // ── Chat ──────────────────────────────────────────────────────────────
+    const chatToggle  = document.getElementById('chat-toggle')
+    const chatPanel   = document.getElementById('chat-panel')
+    const chatInput   = document.getElementById('chat-input')
+    const chatSend    = document.getElementById('chat-send')
+    const chatMsgs    = document.getElementById('chat-messages')
+    const chatBadge   = document.getElementById('chat-badge')
+    let   unread      = 0
+
+    // Open / close the panel
+    chatToggle.addEventListener('click', (e) => {
+      e.stopPropagation()
+      const opening = !chatPanel.classList.contains('open')
+      chatPanel.classList.toggle('open', opening)
+      chatToggle.classList.toggle('open', opening)
+      if (opening) {
+        // Clear unread badge and focus input
+        unread = 0
+        chatBadge.textContent = ''
+        chatBadge.classList.remove('visible')
+        chatInput.focus()
+      }
+    })
+
+    // Send on button click or Enter key
+    function sendMessage() {
+      const text = chatInput.value.trim()
+      if (!text) return
+      spaceSync.sendChat(text)
+      chatInput.value = ''
+    }
+    chatSend.addEventListener('click',   (e) => { e.stopPropagation(); sendMessage() })
+    chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage() })
+
+    // Prevent clicks inside the panel from bubbling to pointer-lock overlay
+    chatPanel.addEventListener('click', (e) => e.stopPropagation())
+
+    // Render an incoming chat message
+    function appendMessage({ from, username: name, text, ts }) {
+      const isSelf = from === spaceSync.id
+      const time   = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+      const msg  = document.createElement('div')
+      msg.className = 'chat-msg'
+      msg.innerHTML = `
+        <div class="chat-msg-meta">
+          <span class="chat-msg-name${isSelf ? ' self' : ''}">${name}</span>
+          <span class="chat-msg-time">${time}</span>
+        </div>
+        <div class="chat-msg-body">${text.replace(/</g, '&lt;')}</div>
+      `
+      chatMsgs.appendChild(msg)
+      chatMsgs.scrollTop = chatMsgs.scrollHeight
+
+      // Increment badge when panel is closed and message is from someone else
+      if (!chatPanel.classList.contains('open') && !isSelf) {
+        unread++
+        chatBadge.textContent = unread > 9 ? '9+' : unread
+        chatBadge.classList.add('visible')
+      }
+    }
+
+    // Show a system line when peers join or leave
+    function appendSystem(text) {
+      const el = document.createElement('div')
+      el.className = 'chat-system'
+      el.textContent = text
+      chatMsgs.appendChild(el)
+      chatMsgs.scrollTop = chatMsgs.scrollHeight
+    }
+
+    // Track peer names so we can show them in leave messages after removal
+    const _peerNames = new Map()
+
+    spaceSync.addEventListener('chat',      e => appendMessage(e.detail))
+    spaceSync.addEventListener('peer:join', e => {
+      _peerNames.set(e.detail.peerId, e.detail.username)
+      appendSystem(`${e.detail.username} joined`)
+    })
+    spaceSync.addEventListener('peer:leave', e => {
+      const name = _peerNames.get(e.detail.peerId) ?? 'Someone'
+      _peerNames.delete(e.detail.peerId)
+      appendSystem(`${name} left`)
+    })
 
     // ── DDHSN swarm + visibility ──────────────────────────────────────────
     const swarmNet = new SwarmNetwork()
@@ -200,7 +285,8 @@ function startBoarding() {
     visLayer.setNode(username, VISIBILITY.PUBLIC)
 
     // ── Network map button ────────────────────────────────────────────────
-    document.getElementById('nm-open-btn').addEventListener('click', () => {
+    document.getElementById('nm-open-btn').addEventListener('click', (e) => {
+      e.stopPropagation()   // prevent click bubbling to pointer-lock overlay
       openNetworkMap(swarmNet, visLayer, username)
     })
 
