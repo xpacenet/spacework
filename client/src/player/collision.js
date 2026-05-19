@@ -2,17 +2,17 @@
 // Doorways are 3-unit wide gaps at X = -1.5 to 1.5
 
 export const WALLS = [
-  // Outer hull bounds (hard limits)
+  // Outer hull bounds
   { type: 'xMin', value: -6.2 },
   { type: 'xMax', value:  6.2 },
   { type: 'zMin', value: -19.5 },
   { type: 'zMax', value:  21.5 },
 
-  // Zone divider: Bridge ↔ Lab at Z = 8 (doorway X: -1.5 to 1.5)
-  { type: 'zWall', z: 8,  xGapMin: -1.6, xGapMax: 1.6 },
+  // Zone divider: Bridge ↔ Lab  — doorway gap X: -1.7 to 1.7
+  { type: 'zWall', z:  6.5, xGapMin: -1.7, xGapMax: 1.7 },
 
-  // Zone divider: Lab ↔ Lounge at Z = -5 (doorway X: -1.5 to 1.5)
-  { type: 'zWall', z: -5, xGapMin: -1.6, xGapMax: 1.6 },
+  // Zone divider: Lab ↔ Lounge — doorway gap X: -1.7 to 1.7
+  { type: 'zWall', z: -5.5, xGapMin: -1.7, xGapMax: 1.7 },
 ]
 
 const RADIUS = 0.35  // avatar collision radius
@@ -47,16 +47,16 @@ export function resolveCollision(prevPos, nextPos) {
 
 // Which zone a Z position is in
 export function getZone(z) {
-  if (z >= 8)   return 'BRIDGE'
-  if (z >= -5)  return 'LAB'
+  if (z >= 6.5)   return 'BRIDGE'
+  if (z >= -5.5)  return 'LAB'
   return 'LOUNGE'
 }
 
 // Zone order for pathfinding
 const ZONE_ORDER = ['LOUNGE', 'LAB', 'BRIDGE']
 const DOORWAYS   = [
-  { z: -5, x: 0, label: 'Lab ↔ Lounge' },
-  { z:  8, x: 0, label: 'Bridge ↔ Lab' },
+  { z: -5.5, x: 0, label: 'Lab ↔ Lounge' },
+  { z:  6.5, x: 0, label: 'Bridge ↔ Lab' },
 ]
 
 export function buildPath(fromPos, toPos) {

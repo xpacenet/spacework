@@ -5,9 +5,9 @@ import { buildPath } from './collision.js'
 
 const SHIP  = { minZ: -20, maxZ: 22, minX: -7, maxX: 7 }
 const ZONES = [
-  { name: 'BRIDGE', minZ:  8, maxZ: 22, color: '#4af',  mapColor: 'rgba(30,80,200,0.45)',  border: '#4466ff', desc: 'Command & Meetings' },
-  { name: 'LAB',    minZ: -5, maxZ:  8, color: '#0fc',  mapColor: 'rgba(0,160,120,0.40)',  border: '#00ffcc', desc: 'Deep Work & Collaboration' },
-  { name: 'LOUNGE', minZ:-20, maxZ: -5, color: '#c6f',  mapColor: 'rgba(100,20,200,0.40)', border: '#aa55ff', desc: 'Casual & Social' },
+  { name: 'BRIDGE', minZ:  6.5, maxZ: 22,   color: '#4af',  mapColor: 'rgba(30,80,200,0.45)',  border: '#4466ff', desc: 'Command & Meetings' },
+  { name: 'LAB',    minZ: -5.5, maxZ:  6.5, color: '#0fc',  mapColor: 'rgba(0,160,120,0.40)',  border: '#00ffcc', desc: 'Deep Work & Collaboration' },
+  { name: 'LOUNGE', minZ: -20,  maxZ: -5.5, color: '#c6f',  mapColor: 'rgba(100,20,200,0.40)', border: '#aa55ff', desc: 'Casual & Social' },
 ]
 const MAP_W = 180, MAP_H = 340
 let mapCanvas, mapCtx
@@ -144,8 +144,8 @@ function drawMinimap(playerPos, mode) {
 
   // Doorway gaps
   const doorways = [
-    { z: 8,  label: 'Door' },
-    { z: -5, label: 'Door' },
+    { z:  6.5, label: 'Door' },
+    { z: -5.5, label: 'Door' },
   ]
   doorways.forEach(d => {
     const [lx, ly] = wToM(-1.6, d.z)

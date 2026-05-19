@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { buildStarfield } from './environment.js'
+import { buildDoors, hideGLBDividers } from './doors.js'
 
 export function initScene(onProgress) {
   const canvas   = document.getElementById('canvas')
@@ -19,6 +20,7 @@ export function initScene(onProgress) {
   camera.position.set(0, 1.7, 12)
 
   buildStarfield(scene)
+  buildDoors(scene)
 
   // ── LIGHTING ─────────────────────────────────────────────────────────────
   // Strong white ambient so everything is readable
@@ -70,7 +72,7 @@ export function initScene(onProgress) {
       ship.rotation.y = Math.PI
       ship.position.y = 2.8
 
-      // Boost emissive intensity on all glowing materials
+      // Boost emissive on glow materials
       ship.traverse(child => {
         if (child.isMesh && child.material) {
           const mats = Array.isArray(child.material) ? child.material : [child.material]
@@ -82,6 +84,10 @@ export function initScene(onProgress) {
       })
 
       scene.add(ship)
+
+      // Hide the solid baked-in divider walls so our doorway walls show instead
+      hideGLBDividers(ship)
+
       onProgress?.(100, 'Ready!')
       setTimeout(notifyLoaded, 300)
     },
