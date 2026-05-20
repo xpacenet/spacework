@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { setupControls }                   from './controls.js'
 import { createLocalAvatar, animateWalk }  from './avatar.js'
-import { buildPath, getZone, setFurnitureColliders } from './collision.js'
+import { getZone, setFurnitureColliders } from './collision.js'
 import { BLDG as B }                       from '../scene/building.js'
 import { buildFurniture }                  from '../scene/furniture.js'
 
@@ -70,8 +70,10 @@ export function initPlayer (scene, camera, renderer, onZoneChange) {
   tick()
 
   return {
-    getPosition: () => avatar.position.clone(),
-    getRotation: () => avatar.rotation.clone(),
+    getPosition:  () => avatar.position.clone(),
+    getRotation:  () => avatar.rotation.clone(),
+    navigate:     (dest) => controls.navigate(dest),
+    isDragMoved:  () => controls.isDragMoved(),
   }
 }
 
@@ -87,8 +89,7 @@ function initMapClick (controls, avatar) {
     // Map canvas → world coords
     const wx = MAP.minX + (mx / MAP.W) * (MAP.maxX - MAP.minX)
     const wz = MAP.maxZ - (my / MAP.H) * (MAP.maxZ - MAP.minZ)
-    const path = buildPath({ x: avatar.position.x, z: avatar.position.z }, { x: wx, z: wz })
-    controls.setNavPath(path)
+    controls.navigate({ x: wx, z: wz })
     showMapPing(mx, my)
   })
 }

@@ -186,6 +186,11 @@ export function getNearbyDoor (pos, maxDist = 2.8) {
   return best
 }
 
+// ── Returns whether a door is currently open ──────────────────────────────
+export function isDoorOpen (id) {
+  return _state[id]?.open ?? false
+}
+
 // ── Returns AABB boxes for all nearly-closed door panels ──────────────────
 // Used by collision.js to block the wall gap when the door is shut.
 export function getClosedColliders () {

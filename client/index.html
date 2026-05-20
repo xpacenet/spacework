@@ -9,7 +9,7 @@
     <style>
       *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
       body { background: #000; overflow: hidden; font-family: 'Inter', sans-serif; color: #fff; }
-      #canvas { display: block; width: 100vw; height: 100vh; }
+      #canvas { display: block; width: 100vw; height: 100vh; cursor: pointer; }
 
       /* ── LOBBY ─────────────────────────────────────────────────────────── */
       #lobby {
@@ -662,8 +662,9 @@
     <!-- CLICK TO START -->
     <div id="click-to-start" class="hidden">
       <div class="cts-box fade-in">
-        <h2>Click to explore the building</h2>
-        <p>Your mouse will be locked for look controls.<br/>Press <strong>ESC</strong> to release at any time.</p>
+        <h2>Click anywhere to start walking</h2>
+        <p>Click a spot on the floor and your avatar walks there.<br/>
+        Drag to rotate the camera &nbsp;·&nbsp; Press <strong>W A S D</strong> for FPS mode.</p>
       </div>
     </div>
 
@@ -732,13 +733,12 @@
       </div>
 
       <div id="controls-hint">
-        <div class="hint-row"><span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span>&nbsp; Move</div>
-        <div class="hint-row"><span class="key">Mouse</span>&nbsp; Look around</div>
+        <div class="hint-row"><span class="key">Click</span>&nbsp; Walk there</div>
+        <div class="hint-row"><span class="key">Drag</span>&nbsp; Rotate camera</div>
+        <div class="hint-row"><span class="key">W A S D</span>&nbsp; FPS move</div>
         <div class="hint-row"><span class="key">TAB</span>&nbsp; Overview mode</div>
         <div class="hint-row"><span class="key">E</span>&nbsp; Open nearby screen</div>
-        <div class="hint-row"><span class="key">F</span>&nbsp; Open / close door</div>
-        <div class="hint-row"><span class="key">R</span>&nbsp; Respawn at Entrance</div>
-        <div class="hint-row"><span class="key">ESC</span>&nbsp; Release cursor</div>
+        <div class="hint-row"><span class="key">R</span>&nbsp; Respawn at entrance</div>
       </div>
 
       <!-- Door proximity hint (appears when near a door) -->

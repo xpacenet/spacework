@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { initScene }         from './scene/index.js'
 import { buildScreens }      from './scene/screens.js'
 import { initPlayer }        from './player/index.js'
-import { getNearbyDoor, toggleDoor } from './scene/doors.js'
+import { getNearbyDoor, toggleDoor, DOOR_DEFS, isDoorOpen } from './scene/doors.js'
 import { generateRoomCode }  from './multiplayer/index.js'
 import { initScreenOverlay } from './ui/screenOverlay.js'
 import { SwarmNetwork, SwarmNode } from './network/swarm.js'
@@ -115,40 +115,58 @@ function startBoarding() {
     const { meshes: screenMeshes, screens } = buildScreens(scene)
     const { openScreen, isOpen }            = initScreenOverlay()
 
-    // ── Pointer lock + screen click ───────────────────────────────────────
-    document.addEventListener('pointerlockchange', () => {
-      if (document.pointerLockElement === renderer.domElement) {
-        clickToStart.classList.add('hidden')
-      } else {
-        clickToStart.classList.remove('hidden')
-      }
-    })
-
-    clickToStart.addEventListener('click', () => renderer.domElement.requestPointerLock())
-
-    const _ray   = new THREE.Raycaster()
-    const _mouse = new THREE.Vector2()
-
-    renderer.domElement.addEventListener('click', e => {
-      if (isOpen()) return
-      if (document.pointerLockElement !== renderer.domElement) {
-        _mouse.x =  (e.clientX / window.innerWidth)  * 2 - 1
-        _mouse.y = -(e.clientY / window.innerHeight) * 2 + 1
-        _ray.setFromCamera(_mouse, camera)
-        const hits = _ray.intersectObjects(screenMeshes)
-        if (hits.length > 0) {
-          openScreen(hits[0].object.userData.screen)
-          return
-        }
-        renderer.domElement.requestPointerLock()
-      }
-    })
-
     // ── Player ────────────────────────────────────────────────────────────
     const player = initPlayer(scene, camera, renderer, updateZoneUI)
 
-    // ── Player ─────────────────────────────────────────────────────────────
-    // (already declared above — kept here for clarity of insertion point)
+    // ── Pointer lock: opt-in (WASD) — click-to-move works without it ─────
+    let _hudStarted = false
+    function dismissStartOverlay () {
+      if (_hudStarted) return
+      _hudStarted = true
+      clickToStart.classList.add('hidden')
+    }
+    // Pointer lock acquired (e.g. user pressed WASD) — hide overlay
+    document.addEventListener('pointerlockchange', () => {
+      if (document.pointerLockElement === renderer.domElement) dismissStartOverlay()
+      // Do NOT re-show overlay on lock release — player has already started
+    })
+    // Clicking the overlay just dismisses it; WASD grants lock on first press
+    clickToStart.addEventListener('click', dismissStartOverlay)
+    const MOV_KEYS = new Set(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'])
+    document.addEventListener('keydown', e => {
+      if (!MOV_KEYS.has(e.code)) return
+      dismissStartOverlay()
+      if (document.pointerLockElement !== renderer.domElement) renderer.domElement.requestPointerLock()
+    })
+
+    // ── Unified canvas click: screen → navigate to floor ─────────────────
+    const _ray        = new THREE.Raycaster()
+    const _mouse      = new THREE.Vector2()
+    const _floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+    const _floorHit   = new THREE.Vector3()
+
+    renderer.domElement.addEventListener('click', e => {
+      if (isOpen()) return
+      if (document.pointerLockElement === renderer.domElement) return  // FPS mode — no click nav
+      if (player.isDragMoved()) return                                  // was a drag-rotate
+
+      dismissStartOverlay()
+
+      _mouse.x =  (e.clientX / window.innerWidth)  * 2 - 1
+      _mouse.y = -(e.clientY / window.innerHeight) * 2 + 1
+      _ray.setFromCamera(_mouse, camera)
+
+      // Screen objects take priority
+      const hits = _ray.intersectObjects(screenMeshes)
+      if (hits.length > 0) { openScreen(hits[0].object.userData.screen); return }
+
+      // Navigate to wherever they clicked on the floor
+      if (!_ray.ray.intersectPlane(_floorPlane, _floorHit)) return
+      player.navigate({
+        x: Math.max(-65, Math.min(65, _floorHit.x)),
+        z: Math.max(-65, Math.min(65, _floorHit.z)),
+      })
+    })
 
     // ── Peer avatars — single system driven by spaceSync ─────────────────
     // spaceSync detects peers via BroadcastChannel (local, instant) and
@@ -330,11 +348,14 @@ function startBoarding() {
       el._t = setTimeout(() => { el.style.opacity = '0' }, 1500)
     }
 
+    // Track which doors we auto-opened so we can auto-close them when player leaves
+    const _autoDoors = new Set()
+
     setInterval(() => {
       if (isOpen()) return
       const pos = player.getPosition()
 
-      // Screen proximity
+      // ── Screen proximity ─────────────────────────────────────────────────
       let nearest = null, nearestDist = 4.0
       screens.forEach(s => {
         const dx = pos.x - s.position.x
@@ -348,7 +369,32 @@ function startBoarding() {
         if (nearest && hintName) hintName.textContent = nearest.label
       }
 
-      // Door proximity
+      // ── Auto-open / auto-close doors ──────────────────────────────────────
+      // Doors open automatically when player walks up; close when they leave.
+      // F key still works for manual override.
+      DOOR_DEFS.forEach(def => {
+        const dx   = pos.x - def.hinge.x
+        const dz   = pos.z - def.hinge.z
+        const dist = Math.sqrt(dx * dx + dz * dz)
+        const id   = def.id
+
+        if (dist < 2.2 && !isDoorOpen(id)) {
+          // Approaching a closed door — open it
+          toggleDoor(id)
+          _autoDoors.add(id)
+          // Keep double main door in sync
+          if (id === 'main-left')  { if (!isDoorOpen('main-right')) toggleDoor('main-right'); _autoDoors.add('main-right') }
+          if (id === 'main-right') { if (!isDoorOpen('main-left'))  toggleDoor('main-left');  _autoDoors.add('main-left')  }
+        } else if (dist > 3.5 && _autoDoors.has(id) && isDoorOpen(id)) {
+          // Left an auto-opened door — close it
+          toggleDoor(id)
+          _autoDoors.delete(id)
+          if (id === 'main-left')  { if (isDoorOpen('main-right')) toggleDoor('main-right'); _autoDoors.delete('main-right') }
+          if (id === 'main-right') { if (isDoorOpen('main-left'))  toggleDoor('main-left');  _autoDoors.delete('main-left')  }
+        }
+      })
+
+      // ── Door proximity hint (F = manual override) ──────────────────────────
       const nearDoor = getNearbyDoor(pos, 2.8)
       _nearestDoor = nearDoor
       const doorHintEl = document.getElementById('door-proximity-hint')
@@ -356,8 +402,7 @@ function startBoarding() {
         if (nearDoor && !nearest) {
           const st = nearDoor.state?.open ? 'Close' : 'Open'
           doorHintEl.style.display = 'flex'
-          doorHintEl.querySelector('#door-hint-name').textContent =
-            `${st} ${nearDoor.def.label}`
+          doorHintEl.querySelector('#door-hint-name').textContent = `${st} ${nearDoor.def.label}`
         } else {
           doorHintEl.style.display = 'none'
         }
