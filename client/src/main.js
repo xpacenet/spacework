@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { initScene }         from './scene/index.js'
 import { buildScreens }      from './scene/screens.js'
 import { initPlayer }        from './player/index.js'
+import { getNearbyDoor, toggleDoor } from './scene/doors.js'
 import { generateRoomCode }  from './multiplayer/index.js'
 import { initScreenOverlay } from './ui/screenOverlay.js'
 import { SwarmNetwork, SwarmNode } from './network/swarm.js'
@@ -294,16 +295,45 @@ function startBoarding() {
     const hintEl   = document.getElementById('screen-hint')
     const hintName = document.getElementById('screen-hint-name')
     let _nearestScreen = null
+    let _nearestDoor   = null
 
     document.addEventListener('keydown', e => {
       if (e.code === 'KeyE' && _nearestScreen && !isOpen()) {
         openScreen(_nearestScreen)
       }
+      if (e.code === 'KeyF' && _nearestDoor) {
+        const isNowOpen = toggleDoor(_nearestDoor.def.id)
+        // For double main door, also toggle its partner leaf
+        if (_nearestDoor.def.id === 'main-left')  toggleDoor('main-right')
+        if (_nearestDoor.def.id === 'main-right')  toggleDoor('main-left')
+        showDoorHint(_nearestDoor.def.label, isNowOpen)
+      }
     })
+
+    function showDoorHint (label, open) {
+      let el = document.getElementById('door-action-hint')
+      if (!el) {
+        el = document.createElement('div')
+        el.id = 'door-action-hint'
+        el.style.cssText = `
+          position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+          background:rgba(0,0,0,0.7);border:1px solid rgba(255,255,255,0.2);
+          padding:10px 22px;border-radius:20px;font-size:0.9rem;color:#fff;
+          pointer-events:none;z-index:13;opacity:0;transition:opacity 0.2s;
+        `
+        document.body.appendChild(el)
+      }
+      el.textContent = `${label} ${open ? 'opened' : 'closed'}`
+      el.style.opacity = '1'
+      clearTimeout(el._t)
+      el._t = setTimeout(() => { el.style.opacity = '0' }, 1500)
+    }
 
     setInterval(() => {
       if (isOpen()) return
       const pos = player.getPosition()
+
+      // Screen proximity
       let nearest = null, nearestDist = 4.0
       screens.forEach(s => {
         const dx = pos.x - s.position.x
@@ -315,6 +345,21 @@ function startBoarding() {
       if (hintEl) {
         hintEl.style.display = nearest ? 'flex' : 'none'
         if (nearest && hintName) hintName.textContent = nearest.label
+      }
+
+      // Door proximity
+      const nearDoor = getNearbyDoor(pos, 2.8)
+      _nearestDoor = nearDoor
+      const doorHintEl = document.getElementById('door-proximity-hint')
+      if (doorHintEl) {
+        if (nearDoor && !nearest) {
+          const st = nearDoor.state?.open ? 'Close' : 'Open'
+          doorHintEl.style.display = 'flex'
+          doorHintEl.querySelector('#door-hint-name').textContent =
+            `${st} ${nearDoor.def.label}`
+        } else {
+          doorHintEl.style.display = 'none'
+        }
       }
     }, 150)
   })
@@ -372,10 +417,13 @@ function showRoomCodeBanner(code) {
 
 // ── Zone UI ────────────────────────────────────────────────────────────────
 const ZONE_META = {
-  BRIDGE: { color: '#44aaff', desc: 'Command & Meetings' },
-  LAB:    { color: '#00ffcc', desc: 'Deep Work & Collaboration' },
-  LOUNGE: { color: '#cc66ff', desc: 'Casual & Social' },
-  '':     { color: '#ffffff', desc: '' },
+  OUTSIDE:     { color: '#88cc66', desc: 'Outside the building' },
+  LOBBY:       { color: '#ffffff', desc: 'Reception & Entrance' },
+  OPS:         { color: '#ffaa44', desc: 'Operations & Technical Support' },
+  FUN:         { color: '#44ffaa', desc: 'Chill, Social & Games' },
+  DESIGN:      { color: '#ff6ba0', desc: 'UI/UX, Design & 3D' },
+  ENGINEERING: { color: '#44aaff', desc: 'Development & Engineering' },
+  '':          { color: '#ffffff', desc: '' },
 }
 
 function updateZoneUI(zoneName) {

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SpaceWork — Virtual Spaceship Workspace</title>
+    <title>SpaceWork — Virtual Office</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <style>
@@ -233,7 +233,7 @@
         display: flex; align-items: center; gap: 6px;
       }
       .minimap-dot { width: 6px; height: 6px; border-radius: 50%; background: #0ff; animation: pulse 2s infinite; }
-      #minimap-canvas { display: block; width: 180px; height: 320px; }
+      #minimap-canvas { display: block; width: 180px; height: 200px; }
 
       /* Click-to-start overlay */
       #click-to-start {
@@ -608,11 +608,12 @@
       <div class="lobby-card fade-in">
         <span class="lobby-logo">Virtual Workspace</span>
         <h1 class="lobby-title">SpaceWork</h1>
-        <p class="lobby-sub">A spaceship in orbit where your team lives,<br/>meets, and builds together.</p>
+        <p class="lobby-sub">A virtual office where your team lives,<br/>meets, and builds together.</p>
         <div class="lobby-zones">
-          <span class="zone-chip bridge">Bridge</span>
-          <span class="zone-chip lab">Lab</span>
-          <span class="zone-chip lounge">Lounge</span>
+          <span class="zone-chip bridge">Design</span>
+          <span class="zone-chip lab">Engineering</span>
+          <span class="zone-chip lounge">Ops</span>
+          <span class="zone-chip" style="background:rgba(68,255,170,0.15);color:#44ffaa;border:1px solid rgba(68,255,170,0.3)">Fun</span>
         </div>
 
         <!-- Connection mode -->
@@ -652,15 +653,15 @@
 
     <!-- LOADING -->
     <div id="loading">
-      <div class="loading-title">PREPARING SHIP</div>
+      <div class="loading-title">BUILDING WORKSPACE</div>
       <div class="loading-bar-bg"><div class="loading-bar-fill" id="load-fill"></div></div>
-      <div class="loading-sub" id="load-text">Loading spaceship...</div>
+      <div class="loading-sub" id="load-text">Preparing building...</div>
     </div>
 
     <!-- CLICK TO START -->
     <div id="click-to-start" class="hidden">
       <div class="cts-box fade-in">
-        <h2>Click to explore the ship</h2>
+        <h2>Click to explore the building</h2>
         <p>Your mouse will be locked for look controls.<br/>Press <strong>ESC</strong> to release at any time.</p>
       </div>
     </div>
@@ -679,7 +680,7 @@
       <div id="minimap">
         <div class="minimap-header">
           <div class="minimap-dot"></div>
-          SHIP MAP
+          BUILDING MAP
         </div>
         <canvas id="minimap-canvas"></canvas>
       </div>
@@ -725,8 +726,8 @@
       <div id="zone-map"></div>
 
       <div id="zone-banner">
-        <div class="zone-name" id="zone-name" style="color:#4af;">BRIDGE</div>
-        <div class="zone-desc" id="zone-desc">Command &amp; Meetings</div>
+        <div class="zone-name" id="zone-name" style="color:#88cc66;">OUTSIDE</div>
+        <div class="zone-desc" id="zone-desc">Outside the building</div>
       </div>
 
       <div id="controls-hint">
@@ -734,8 +735,21 @@
         <div class="hint-row"><span class="key">Mouse</span>&nbsp; Look around</div>
         <div class="hint-row"><span class="key">TAB</span>&nbsp; Overview mode</div>
         <div class="hint-row"><span class="key">E</span>&nbsp; Open nearby screen</div>
-        <div class="hint-row"><span class="key">R</span>&nbsp; Respawn at Bridge</div>
+        <div class="hint-row"><span class="key">F</span>&nbsp; Open / close door</div>
+        <div class="hint-row"><span class="key">R</span>&nbsp; Respawn at Entrance</div>
         <div class="hint-row"><span class="key">ESC</span>&nbsp; Release cursor</div>
+      </div>
+
+      <!-- Door proximity hint (appears when near a door) -->
+      <div id="door-proximity-hint" style="
+        position:fixed;bottom:160px;left:50%;transform:translateX(-50%);
+        z-index:11;pointer-events:none;
+        display:none;align-items:center;gap:8px;
+        background:rgba(0,5,20,0.82);border:1px solid rgba(255,255,255,0.18);
+        padding:8px 18px;border-radius:24px;font-size:0.82rem;color:rgba(255,255,255,0.9);
+        backdrop-filter:blur(8px);white-space:nowrap;
+      ">
+        <span class="key">F</span> <span id="door-hint-name">Open Door</span>
       </div>
     </div>
 

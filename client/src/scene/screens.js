@@ -1,50 +1,60 @@
 import * as THREE from 'three'
+import { BLDG as B } from './building.js'
 
-// ── Screen definitions ─────────────────────────────────────────────────────
+// ── Screen definitions — one per zone ──────────────────────────────────────
 export const SCREENS = [
   {
-    id:       'bridge-whiteboard',
-    label:    'Whiteboard',
-    zone:     'BRIDGE',
+    id:       'design-screen',
+    label:    'Design Board',
+    zone:     'DESIGN',
     tool:     'Excalidraw',
     url:      'https://excalidraw.com',
-    position: { x: 0,    y: 2.2, z: 19.2 },
-    rotationY: Math.PI,          // face -Z toward players entering bridge
-    width:  5.5,
-    height: 3.0,
-    color:  0x4466ff,
-    emoji:  '✏️',
+    position: { x: B.minX + 0.12, y: 2.2, z: -14 },
+    rotationY: Math.PI / 2,   // faces +X (into room from left wall)
+    width: 4.5, height: 2.8,
+    color: 0xff6ba0,
+    emoji: '✏️',
   },
   {
-    id:       'lab-docs',
-    label:    'Team Docs',
-    zone:     'LAB',
+    id:       'engineering-screen',
+    label:    'Code Docs',
+    zone:     'ENGINEERING',
     tool:     'HackMD',
     url:      'https://hackmd.io',
-    position: { x: -5.8, y: 2.2, z: 0.5 },
-    rotationY: Math.PI / 2,      // face +X into lab room
-    width:  4.0,
-    height: 2.5,
-    color:  0x00ffcc,
-    emoji:  '📝',
+    position: { x: B.maxX - 0.12, y: 2.2, z: -14 },
+    rotationY: -Math.PI / 2,  // faces -X (into room from right wall)
+    width: 4.5, height: 2.8,
+    color: 0x44aaff,
+    emoji: '💻',
   },
   {
-    id:       'lounge-vibe',
+    id:       'ops-screen',
+    label:    'Ops Dashboard',
+    zone:     'OPS',
+    tool:     'Grafana',
+    url:      'https://play.grafana.org',
+    position: { x: B.minX + 0.12, y: 2.2, z: 0 },
+    rotationY: Math.PI / 2,
+    width: 4.0, height: 2.5,
+    color: 0xffaa44,
+    emoji: '📊',
+  },
+  {
+    id:       'fun-screen',
     label:    'Vibe Zone',
-    zone:     'LOUNGE',
+    zone:     'FUN',
     tool:     'Spotify',
     url:      'https://open.spotify.com/embed/playlist/37i9dQZF1DX0XUsuxWHRQd?utm_source=generator&theme=0',
-    position: { x: 0,    y: 2.2, z: -19.2 },
-    rotationY: 0,                // face +Z toward players in lounge
-    width:  4.5,
-    height: 2.8,
-    color:  0xaa55ff,
-    emoji:  '🎵',
+    position: { x: B.maxX - 0.12, y: 2.2, z: 0 },
+    rotationY: -Math.PI / 2,
+    width: 4.0, height: 2.5,
+    color: 0x44ffaa,
+    emoji: '🎵',
   },
 ]
 
-// ── Build all screens in the scene ─────────────────────────────────────────
-export function buildScreens(scene) {
+// ── Build all screens ─────────────────────────────────────────────────────
+export function buildScreens (scene) {
   const meshes = []
 
   SCREENS.forEach(s => {
@@ -53,58 +63,70 @@ export function buildScreens(scene) {
     group.rotation.y = s.rotationY
     scene.add(group)
 
-    // Dark metal frame
+    const ft = 0.1  // frame thickness
     const frameMat = new THREE.MeshStandardMaterial({
-      color: 0x0d1424, roughness: 0.25, metalness: 0.92,
+      color: 0x1a1a1a, roughness: 0.3, metalness: 0.85,
     })
-    const ft = 0.12  // frame thickness
-    addBox(group, frameMat, -(s.width / 2 + ft / 2), 0, 0,          ft,                 s.height + ft * 2, ft * 2)  // left
-    addBox(group, frameMat,  (s.width / 2 + ft / 2), 0, 0,          ft,                 s.height + ft * 2, ft * 2)  // right
-    addBox(group, frameMat, 0,  s.height / 2 + ft / 2, 0,           s.width + ft * 2,   ft,                ft * 2)  // top
-    addBox(group, frameMat, 0, -s.height / 2 - ft / 2, 0,           s.width + ft * 2,   ft,                ft * 2)  // bottom
 
-    // Glow trim inside frame edges
-    const glowMat = glowMaterial(s.color)
-    addBox(group, glowMat, 0,  s.height / 2, 0.02, s.width, 0.035, 0.035)   // top edge
-    addBox(group, glowMat, 0, -s.height / 2, 0.02, s.width, 0.035, 0.035)   // bottom edge
-    addBox(group, glowMat, -s.width / 2, 0,  0.02, 0.035, s.height, 0.035)  // left edge
-    addBox(group, glowMat,  s.width / 2, 0,  0.02, 0.035, s.height, 0.035)  // right edge
+    // Frame bars
+    const addBar = (x, y, z, w, h, d) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), frameMat)
+      m.position.set(x, y, z)
+      group.add(m)
+    }
+    addBar(0,                     s.height / 2 + ft / 2, 0, s.width + ft * 2, ft, ft * 2)  // top
+    addBar(0,                    -s.height / 2 - ft / 2, 0, s.width + ft * 2, ft, ft * 2)  // bottom
+    addBar(-s.width / 2 - ft / 2, 0,                     0, ft, s.height + ft * 2, ft * 2)  // left
+    addBar( s.width / 2 + ft / 2, 0,                     0, ft, s.height + ft * 2, ft * 2)  // right
 
-    // Interactive screen face
-    const screenTex = makeScreenTexture(s)
-    const screenMat = new THREE.MeshStandardMaterial({
-      map:              screenTex,
-      emissiveMap:      screenTex,
-      emissive:         new THREE.Color(s.color),
+    // Glow trim
+    const glowMat = new THREE.MeshStandardMaterial({
+      color: s.color, emissive: s.color, emissiveIntensity: 2.5, roughness: 0.08,
+    })
+    const addTrim = (x, y, z, w, h, d) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), glowMat)
+      m.position.set(x, y, z)
+      group.add(m)
+    }
+    addTrim(0,                s.height / 2, 0.02, s.width, 0.04, 0.04)
+    addTrim(0,               -s.height / 2, 0.02, s.width, 0.04, 0.04)
+    addTrim(-s.width / 2, 0,               0.02, 0.04, s.height, 0.04)
+    addTrim( s.width / 2, 0,               0.02, 0.04, s.height, 0.04)
+
+    // Screen face
+    const tex    = makeScreenTexture(s)
+    const faceMat = new THREE.MeshStandardMaterial({
+      map: tex, emissiveMap: tex,
+      emissive: new THREE.Color(s.color),
       emissiveIntensity: 0.14,
-      roughness:        0.1,
+      roughness: 0.1,
     })
-    const screenMesh = new THREE.Mesh(new THREE.PlaneGeometry(s.width, s.height), screenMat)
+    const screenMesh = new THREE.Mesh(new THREE.PlaneGeometry(s.width, s.height), faceMat)
     screenMesh.position.set(0, 0, 0.02)
     screenMesh.userData.screen = s
     group.add(screenMesh)
     meshes.push(screenMesh)
 
-    // Light spill from screen
-    const light = new THREE.PointLight(s.color, 18, 9)
+    // Point light spill
+    const light = new THREE.PointLight(s.color, 16, 8)
     light.position.set(0, 0, 0.6)
     group.add(light)
 
-    // Subtle idle pulse
+    // Idle pulse
     let t = Math.random() * Math.PI * 2
-    ;(function pulse() {
+    ;(function pulse () {
       requestAnimationFrame(pulse)
       t += 0.018
-      screenMat.emissiveIntensity = 0.12 + Math.sin(t) * 0.04
-      light.intensity = 16 + Math.sin(t * 0.65) * 4
+      faceMat.emissiveIntensity = 0.12 + Math.sin(t) * 0.04
+      light.intensity = 14 + Math.sin(t * 0.65) * 4
     })()
   })
 
   return { meshes, screens: SCREENS }
 }
 
-// ── Texture for screen face ────────────────────────────────────────────────
-function makeScreenTexture(s) {
+// ── Canvas texture for screen face ────────────────────────────────────────
+function makeScreenTexture (s) {
   const W = 512
   const H = Math.round(512 * (s.height / s.width))
   const cvs = document.createElement('canvas')
@@ -112,81 +134,66 @@ function makeScreenTexture(s) {
   const ctx = cvs.getContext('2d')
   const hex = '#' + s.color.toString(16).padStart(6, '0')
 
-  // Dark BG
-  ctx.fillStyle = '#020b1a'
+  // Background
+  ctx.fillStyle = '#060c18'
   ctx.fillRect(0, 0, W, H)
 
-  // Subtle dot-grid
-  ctx.fillStyle = 'rgba(100,180,255,0.04)'
-  for (let gx = 0; gx < W; gx += 36) {
-    for (let gy = 0; gy < H; gy += 36) {
+  // Dot grid
+  ctx.fillStyle = 'rgba(200,230,255,0.035)'
+  for (let gx = 0; gx < W; gx += 32) {
+    for (let gy = 0; gy < H; gy += 32) {
       ctx.fillRect(gx, gy, 2, 2)
     }
   }
 
-  // Header gradient band
+  // Header band
   const grad = ctx.createLinearGradient(0, 0, W, 0)
-  grad.addColorStop(0, hex + '44')
+  grad.addColorStop(0, hex + '55')
   grad.addColorStop(1, 'transparent')
   ctx.fillStyle = grad
-  ctx.fillRect(0, 0, W, 48)
+  ctx.fillRect(0, 0, W, 46)
 
   // Zone label
   ctx.fillStyle = hex
-  ctx.font = 'bold 17px Inter, monospace'
+  ctx.font = 'bold 16px Inter, monospace'
   ctx.textAlign = 'left'
-  ctx.fillText(s.zone, 14, 31)
+  ctx.fillText(s.zone, 14, 30)
 
-  // Tool name (top-right)
-  ctx.fillStyle = 'rgba(255,255,255,0.4)'
-  ctx.font = '13px Inter, monospace'
+  // Tool name
+  ctx.fillStyle = 'rgba(255,255,255,0.38)'
+  ctx.font = '12px Inter, monospace'
   ctx.textAlign = 'right'
-  ctx.fillText(s.tool, W - 14, 31)
+  ctx.fillText(s.tool, W - 14, 30)
 
-  // Thin header divider
-  ctx.strokeStyle = hex + '55'
+  // Divider
+  ctx.strokeStyle = hex + '44'
   ctx.lineWidth = 1
-  ctx.beginPath(); ctx.moveTo(0, 50); ctx.lineTo(W, 50); ctx.stroke()
+  ctx.beginPath(); ctx.moveTo(0, 48); ctx.lineTo(W, 48); ctx.stroke()
 
-  // Big emoji center
-  const emojiSize = Math.round(H * 0.28)
+  // Emoji
+  const emojiSize = Math.round(H * 0.27)
   ctx.font = `${emojiSize}px sans-serif`
   ctx.textAlign = 'center'
   ctx.fillText(s.emoji, W / 2, H * 0.52)
 
-  // Screen label
+  // Label
   ctx.fillStyle = '#fff'
   ctx.font = `bold ${Math.round(H * 0.1)}px Inter, monospace`
   ctx.textAlign = 'center'
-  ctx.shadowColor = hex
-  ctx.shadowBlur = 18
+  ctx.shadowColor = hex; ctx.shadowBlur = 18
   ctx.fillText(s.label, W / 2, H * 0.72)
   ctx.shadowBlur = 0
 
-  // Interaction hint
+  // Hint
   ctx.fillStyle = hex + 'bb'
-  ctx.font = `${Math.round(H * 0.065)}px Inter, monospace`
+  ctx.font = `${Math.round(H * 0.062)}px Inter, monospace`
   ctx.textAlign = 'center'
   ctx.fillText('[ E ] or click to open', W / 2, H * 0.88)
 
-  // Bottom accent line
+  // Bottom accent
   ctx.strokeStyle = hex + '55'
   ctx.lineWidth = 2
   ctx.beginPath(); ctx.moveTo(0, H - 2); ctx.lineTo(W, H - 2); ctx.stroke()
 
   return new THREE.CanvasTexture(cvs)
-}
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-function glowMaterial(color) {
-  return new THREE.MeshStandardMaterial({
-    color, emissive: color, emissiveIntensity: 2.5, roughness: 0.08,
-  })
-}
-
-function addBox(parent, mat, x, y, z, w, h, d) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat)
-  m.position.set(x, y, z)
-  parent.add(m)
-  return m
 }

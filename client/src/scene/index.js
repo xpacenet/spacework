@@ -1,108 +1,76 @@
 import * as THREE from 'three'
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
-import { buildStarfield } from './environment.js'
-import { buildDoors, hideGLBDividers } from './doors.js'
+import { buildBuilding } from './building.js'
+import { buildOutdoors }  from './outdoors.js'
+import { buildDoors }     from './doors.js'
 
-export function initScene(onProgress) {
+// ── Scene initialiser ─────────────────────────────────────────────────────
+export function initScene (onProgress) {
   const canvas   = document.getElementById('canvas')
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
   renderer.setSize(window.innerWidth, window.innerHeight)
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.shadowMap.enabled = false
-  renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 2.2   // much brighter overall
+  renderer.toneMapping        = THREE.ACESFilmicToneMapping
+  renderer.toneMappingExposure = 1.4
 
-  const scene  = new THREE.Scene()
-  scene.background = new THREE.Color(0x00010a)
-  scene.fog = new THREE.FogExp2(0x00010a, 0.018)  // lighter fog
+  const scene = new THREE.Scene()
+  // Daytime sky — light blue with gentle haze
+  scene.background = new THREE.Color(0x7ec8e8)
+  scene.fog = new THREE.FogExp2(0x9dd5e8, 0.009)
 
+  // Player starts outside (z ≈ 22), 80° FOV gives a natural first-person feel
   const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 300)
-  camera.position.set(0, 1.7, 12)
+  camera.position.set(0, 1.7, 22)
 
-  buildStarfield(scene)
-  buildDoors(scene)
+  // ── LIGHTING ──────────────────────────────────────────────────────────────
 
-  // ── LIGHTING ─────────────────────────────────────────────────────────────
-  // Strong white ambient so everything is readable
-  scene.add(new THREE.AmbientLight(0xffffff, 3.0))
+  // Bright soft ambient so every surface is legible
+  scene.add(new THREE.AmbientLight(0xffffff, 1.4))
 
-  // Hemisphere light — warm ceiling, cool floor bounce
-  const hemi = new THREE.HemisphereLight(0x8ab0ff, 0x334466, 2.5)
-  scene.add(hemi)
+  // Hemisphere: warm sky blue above, cool green-grey below (outdoor feel)
+  scene.add(new THREE.HemisphereLight(0x7ec8e8, 0x4a7c3f, 1.2))
 
-  // Zone key lights — bright, wide radius
-  const zoneLights = [
-    { pos: [0, 4,  14], color: 0x6699ff, intensity: 120, radius: 22 },  // Bridge — blue
-    { pos: [0, 4,   0], color: 0x00ffcc, intensity: 120, radius: 22 },  // Lab    — cyan
-    { pos: [0, 4, -12], color: 0xaa55ff, intensity: 100, radius: 22 },  // Lounge — purple
+  // Sun — directional, coming from upper-right-front
+  const sun = new THREE.DirectionalLight(0xfff8e8, 3.2)
+  sun.position.set(30, 60, 40)
+  scene.add(sun)
+
+  // Softer fill from the opposite side
+  const fill = new THREE.DirectionalLight(0xd0e8ff, 0.8)
+  fill.position.set(-20, 30, -20)
+  scene.add(fill)
+
+  // Interior zone lights (tinted, warm-ish)
+  const roomLights = [
+    { pos: [-11, 3.8, -14], color: 0xffb8d0, intensity: 40, radius: 18 },  // Design  (pink)
+    { pos: [ 11, 3.8, -14], color: 0x88ccff, intensity: 40, radius: 18 },  // Engineering (blue)
+    { pos: [-11, 3.8,   0], color: 0xffd090, intensity: 35, radius: 16 },  // Ops  (amber)
+    { pos: [ 11, 3.8,   0], color: 0x88ffcc, intensity: 35, radius: 16 },  // Fun  (green)
+    { pos: [  0, 3.8,   8], color: 0xffffff, intensity: 30, radius: 20 },  // Lobby (white)
   ]
-  zoneLights.forEach(({ pos, color, intensity, radius }) => {
+  roomLights.forEach(({ pos, color, intensity, radius }) => {
     const pl = new THREE.PointLight(color, intensity, radius)
     pl.position.set(...pos)
     scene.add(pl)
-    // Second fill light lower down so faces/desks are lit
-    const pl2 = new THREE.PointLight(color, 60, radius * 0.7)
+    // Low fill
+    const pl2 = new THREE.PointLight(color, intensity * 0.4, radius * 0.5)
     pl2.position.set(pos[0], 0.5, pos[2])
     scene.add(pl2)
   })
 
-  // Extra corridor fill lights
-  const fills = [
-    [0, 2,  7], [0, 2, -6],   // between zones
-    [-4, 2, 14], [4, 2, 14],  // bridge sides
-    [-4, 2,  0], [4, 2,  0],  // lab sides
-  ]
-  fills.forEach(pos => {
-    const fl = new THREE.PointLight(0xffffff, 30, 12)
-    fl.position.set(...pos)
-    scene.add(fl)
-  })
+  // Outdoor lamp post lights added from outdoors.js (done there)
 
-  // ── LOAD GLB ─────────────────────────────────────────────────────────────
-  let _onLoaded = null
-  const notifyLoaded = () => { if (_onLoaded) _onLoaded() }
+  // ── WORLD GEOMETRY ────────────────────────────────────────────────────────
+  onProgress?.(10, 'Laying foundations…')
+  buildOutdoors(scene)
+  onProgress?.(30, 'Building structure…')
+  buildBuilding(scene)
+  onProgress?.(55, 'Installing doors…')
+  const doors = buildDoors(scene)
+  onProgress?.(90, 'Finishing touches…')
 
-  const loader = new GLTFLoader()
-  onProgress?.(10, 'Connecting to ship...')
-
-  loader.load(
-    '/models/spaceship.glb',
-    (gltf) => {
-      const ship = gltf.scene
-      ship.rotation.y = Math.PI
-      ship.position.y = 2.8
-
-      // Boost emissive on glow materials
-      ship.traverse(child => {
-        if (child.isMesh && child.material) {
-          const mats = Array.isArray(child.material) ? child.material : [child.material]
-          mats.forEach(m => {
-            if (m.emissiveIntensity) m.emissiveIntensity *= 2.5
-            m.needsUpdate = true
-          })
-        }
-      })
-
-      scene.add(ship)
-
-      // Hide the solid baked-in divider walls so our doorway walls show instead
-      hideGLBDividers(ship)
-
-      onProgress?.(100, 'Ready!')
-      setTimeout(notifyLoaded, 300)
-    },
-    (xhr) => {
-      if (xhr.total) {
-        const pct = Math.round(10 + (xhr.loaded / xhr.total) * 85)
-        onProgress?.(pct, `Loading ship... ${pct}%`)
-      }
-    },
-    () => {
-      buildPlaceholderShip(scene)
-      onProgress?.(100, 'Ready!')
-      setTimeout(notifyLoaded, 300)
-    }
-  )
+  // Expose doors for per-frame update and collision queries
+  scene.userData.doors = doors
 
   // ── RESIZE ────────────────────────────────────────────────────────────────
   window.addEventListener('resize', () => {
@@ -112,53 +80,23 @@ export function initScene(onProgress) {
   })
 
   // ── RENDER LOOP ───────────────────────────────────────────────────────────
-  function animate() {
+  const clock = new THREE.Clock()
+  function animate () {
     requestAnimationFrame(animate)
+    const delta = clock.getDelta()
+    // Advance door animations each frame
+    doors.update(delta)
     renderer.render(scene, camera)
   }
   animate()
 
+  // Ready immediately — no async asset loading
+  let _onLoaded = null
+  onProgress?.(100, 'Ready!')
+  setTimeout(() => { if (_onLoaded) _onLoaded() }, 200)
+
   return {
     scene, camera, renderer,
-    onShipLoaded: (cb) => { _onLoaded = cb }
+    onShipLoaded: cb => { _onLoaded = cb },
   }
-}
-
-// ── PLACEHOLDER (fallback if no .glb) ────────────────────────────────────────
-function buildPlaceholderShip(scene) {
-  const mkMat = (color, emissive, emissiveIntensity = 0) =>
-    new THREE.MeshStandardMaterial({ color, emissive, emissiveIntensity, roughness: 0.5, metalness: 0.6 })
-
-  const hull   = mkMat(0x1a2030, 0x000000)
-  const floor  = mkMat(0x0e1420, 0x000000)
-  const scrn   = mkMat(0x001833, 0x003377, 2)
-  const glowB  = mkMat(0x0066ff, 0x0044ff, 3)
-  const glowC  = mkMat(0x00ffcc, 0x00ccaa, 3)
-  const glowP  = mkMat(0x8800ff, 0x6600cc, 3)
-
-  const add = (geo, mat, x, y, z) => {
-    const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); scene.add(m); return m
-  }
-
-  // Floors
-  add(new THREE.BoxGeometry(14,0.3,14), floor,  0, 0,  12)
-  add(new THREE.BoxGeometry(14,0.3,18), floor,  0, 0,   0)
-  add(new THREE.BoxGeometry(14,0.3,16), floor,  0, 0, -11)
-  // Walls
-  add(new THREE.BoxGeometry(14,6,0.2), hull,  0, 3,  20)
-  add(new THREE.BoxGeometry(0.2,6,42), hull, -7, 3,   0)
-  add(new THREE.BoxGeometry(0.2,6,42), hull,  7, 3,   0)
-  add(new THREE.BoxGeometry(14,6,0.2), hull,  0, 3, -21)
-  // Ceiling
-  add(new THREE.BoxGeometry(14,0.2,42), hull, 0, 6, 0)
-  // Zone dividers
-  add(new THREE.BoxGeometry(14,6,0.2), hull, 0, 3, 6.5)
-  add(new THREE.BoxGeometry(14,6,0.2), hull, 0, 3,-5.5)
-  // Glow strips
-  add(new THREE.BoxGeometry(0.1,0.1,14), glowB, -6.9, 0.2,  12)
-  add(new THREE.BoxGeometry(0.1,0.1,18), glowC, -6.9, 0.2,   0)
-  add(new THREE.BoxGeometry(0.1,0.1,16), glowP, -6.9, 0.2, -11)
-  // Screens
-  add(new THREE.BoxGeometry(8,3,0.1), scrn,  0, 3, 19.8)
-  add(new THREE.BoxGeometry(5,3,0.1), scrn,  0, 3,-20.8)
 }

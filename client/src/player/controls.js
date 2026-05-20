@@ -8,7 +8,7 @@ const CAM_LERP    = 0.1
 
 export function setupControls(avatar, camera, domElement) {
   const keys = {}
-  let yaw      = 0
+  let yaw      = Math.PI   // face toward building on spawn
   let mode     = 'third'   // 'third' | 'overview'
   let navPath  = []        // waypoints for click-to-move
   let navIdx   = 0
@@ -18,12 +18,12 @@ export function setupControls(avatar, camera, domElement) {
   document.addEventListener('keydown', e => {
     keys[e.code] = true
 
-    // R — reset to spawn
+    // R — reset to spawn (outside the building entrance)
     if (e.code === 'KeyR') {
-      avatar.position.set(0, 0, 12)
-      yaw = 0
+      avatar.position.set(0, 0, 22)
+      yaw = Math.PI   // face toward building (-Z)
       navPath = []; autoMoving = false
-      showToast('Respawned at Bridge')
+      showToast('Respawned at Entrance')
     }
 
     // Tab — toggle overview

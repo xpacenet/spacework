@@ -1,56 +1,64 @@
 import * as THREE from 'three'
-import { setupControls } from './controls.js'
-import { createLocalAvatar, animateWalk } from './avatar.js'
-import { buildPath } from './collision.js'
+import { setupControls }                   from './controls.js'
+import { createLocalAvatar, animateWalk }  from './avatar.js'
+import { buildPath, getZone, setFurnitureColliders } from './collision.js'
+import { BLDG as B }                       from '../scene/building.js'
+import { buildFurniture }                  from '../scene/furniture.js'
 
-const SHIP  = { minZ: -20, maxZ: 22, minX: -7, maxX: 7 }
+// ── Zone visual config ────────────────────────────────────────────────────
 const ZONES = [
-  { name: 'BRIDGE', minZ:  6.5, maxZ: 22,   color: '#4af',  mapColor: 'rgba(30,80,200,0.45)',  border: '#4466ff', desc: 'Command & Meetings' },
-  { name: 'LAB',    minZ: -5.5, maxZ:  6.5, color: '#0fc',  mapColor: 'rgba(0,160,120,0.40)',  border: '#00ffcc', desc: 'Deep Work & Collaboration' },
-  { name: 'LOUNGE', minZ: -20,  maxZ: -5.5, color: '#c6f',  mapColor: 'rgba(100,20,200,0.40)', border: '#aa55ff', desc: 'Casual & Social' },
+  { name: 'OUTSIDE',      color: '#88cc66', mapColor: 'rgba(70,120,50,0.35)',   border: '#66aa44', desc: 'Outside the building' },
+  { name: 'LOBBY',        color: '#ffffff', mapColor: 'rgba(200,200,230,0.40)', border: '#aaaacc', desc: 'Reception & Entrance' },
+  { name: 'OPS',          color: '#ffaa44', mapColor: 'rgba(200,120,20,0.40)',  border: '#ffaa44', desc: 'Operations & Support' },
+  { name: 'FUN',          color: '#44ffaa', mapColor: 'rgba(20,180,100,0.40)',  border: '#44ffaa', desc: 'Chill & Social' },
+  { name: 'DESIGN',       color: '#ff6ba0', mapColor: 'rgba(200,50,100,0.40)', border: '#ff6ba0', desc: 'UI/UX & 3D Design' },
+  { name: 'ENGINEERING',  color: '#44aaff', mapColor: 'rgba(30,100,200,0.40)', border: '#44aaff', desc: 'Development & Code' },
 ]
-const MAP_W = 180, MAP_H = 340
+
+// Map canvas world extents (includes outdoor area)
+const MAP = {
+  minX: -26, maxX: 26,
+  minZ: -27, maxZ: 28,
+  W: 180, H: 200,
+}
+
 let mapCanvas, mapCtx
 
-export function initPlayer(scene, camera, renderer, onZoneChange) {
-  const username = window._spaceUsername || 'You'
-  const avatar   = createLocalAvatar(username)
-  avatar.position.set(0, 0, 12)
+export function initPlayer (scene, camera, renderer, onZoneChange) {
+  const username  = window._spaceUsername || 'You'
+  const avatar    = createLocalAvatar(username)
+  avatar.position.set(0, 0, 22)   // spawn outside, facing building
   scene.add(avatar)
+
+  // Build furniture colliders and register them
+  const { colliders: furnitureCols } = buildFurniture(scene)
+  setFurnitureColliders(furnitureCols)
 
   const controls  = setupControls(avatar, camera, renderer.domElement)
   const clock     = new THREE.Clock()
   let currentZone = ''
 
-  // Minimap click-to-move
   initMapClick(controls, avatar)
 
-  function detectZone() {
-    const z = avatar.position.z
-    for (const zone of ZONES) {
-      if (z >= zone.minZ && z <= zone.maxZ) {
-        if (zone.name !== currentZone) {
-          currentZone = zone.name
-          onZoneChange?.(currentZone)
-        }
-        return
-      }
+  function detectZone () {
+    const zone = getZone(avatar.position)
+    if (zone !== currentZone) {
+      currentZone = zone
+      onZoneChange?.(currentZone)
     }
-    if (currentZone !== '') { currentZone = ''; onZoneChange?.('') }
   }
 
-  // Mode badge updates
-  function updateModeBadge() {
+  function updateModeBadge () {
     const badge = document.getElementById('mode-badge')
     if (!badge) return
     const m = controls.getMode()
-    badge.textContent = m === 'overview' ? '🗺 OVERVIEW' : '🎮 EXPLORE'
-    badge.style.background = m === 'overview' ? 'rgba(255,160,0,0.2)' : 'rgba(0,100,255,0.2)'
-    badge.style.borderColor= m === 'overview' ? 'rgba(255,160,0,0.4)' : 'rgba(0,150,255,0.4)'
-    badge.style.color      = m === 'overview' ? '#ffaa00' : '#4af'
+    badge.textContent   = m === 'overview' ? '🗺 OVERVIEW' : '🎮 EXPLORE'
+    badge.style.background   = m === 'overview' ? 'rgba(255,160,0,0.2)' : 'rgba(0,100,255,0.2)'
+    badge.style.borderColor  = m === 'overview' ? 'rgba(255,160,0,0.4)' : 'rgba(0,150,255,0.4)'
+    badge.style.color        = m === 'overview' ? '#ffaa00' : '#4af'
   }
 
-  function tick() {
+  function tick () {
     requestAnimationFrame(tick)
     const delta  = clock.getDelta()
     const moving = controls.update(delta)
@@ -67,145 +75,138 @@ export function initPlayer(scene, camera, renderer, onZoneChange) {
   }
 }
 
-// ── Minimap canvas click-to-move ───────────────────────────────────────────
-function initMapClick(controls, avatar) {
+// ── Minimap click-to-move ─────────────────────────────────────────────────
+function initMapClick (controls, avatar) {
   const cvs = document.getElementById('minimap-canvas')
   if (!cvs) return
   cvs.style.cursor = 'crosshair'
   cvs.addEventListener('click', e => {
     const rect = cvs.getBoundingClientRect()
-    const mx   = (e.clientX - rect.left) / rect.width  * MAP_W
-    const my   = (e.clientY - rect.top)  / rect.height * MAP_H
-
-    // Map coords → world coords
-    const wx = SHIP.minX + (mx / MAP_W) * (SHIP.maxX - SHIP.minX)
-    const wz = SHIP.maxZ - (my / MAP_H) * (SHIP.maxZ - SHIP.minZ)
-
-    const path = buildPath(
-      { x: avatar.position.x, z: avatar.position.z },
-      { x: wx, z: wz }
-    )
+    const mx   = (e.clientX - rect.left) / rect.width  * MAP.W
+    const my   = (e.clientY - rect.top)  / rect.height * MAP.H
+    // Map canvas → world coords
+    const wx = MAP.minX + (mx / MAP.W) * (MAP.maxX - MAP.minX)
+    const wz = MAP.maxZ - (my / MAP.H) * (MAP.maxZ - MAP.minZ)
+    const path = buildPath({ x: avatar.position.x, z: avatar.position.z }, { x: wx, z: wz })
     controls.setNavPath(path)
     showMapPing(mx, my)
   })
 }
 
-function showMapPing(mx, my) {
-  const cvs = document.getElementById('minimap-canvas')
-  if (!cvs || !mapCtx) return
-  // Draw a temporary ping ring — will fade in next draw calls
+function showMapPing (mx, my) {
+  if (!mapCtx) return
   mapCtx.strokeStyle = '#fff'
   mapCtx.lineWidth   = 1.5
-  mapCtx.globalAlpha = 0.8
-  mapCtx.beginPath()
-  mapCtx.arc(mx, my, 8, 0, Math.PI*2)
-  mapCtx.stroke()
+  mapCtx.globalAlpha = 0.9
+  mapCtx.beginPath(); mapCtx.arc(mx, my, 7, 0, Math.PI * 2); mapCtx.stroke()
   mapCtx.globalAlpha = 1
 }
 
-// ── Minimap drawing ─────────────────────────────────────────────────────────
-function initMinimap() {
+// ── Minimap drawing ───────────────────────────────────────────────────────
+function initMinimap () {
   mapCanvas = document.getElementById('minimap-canvas')
   if (!mapCanvas) return
-  mapCanvas.width  = MAP_W
-  mapCanvas.height = MAP_H
+  mapCanvas.width  = MAP.W
+  mapCanvas.height = MAP.H
   mapCtx = mapCanvas.getContext('2d')
 }
 
-function wToM(x, z) {
-  const mx = ((x - SHIP.minX) / (SHIP.maxX - SHIP.minX)) * MAP_W
-  const my = ((SHIP.maxZ - z) / (SHIP.maxZ - SHIP.minZ)) * MAP_H
+// world → map canvas
+function wToM (x, z) {
+  const mx = ((x - MAP.minX) / (MAP.maxX - MAP.minX)) * MAP.W
+  const my = ((MAP.maxZ - z) / (MAP.maxZ - MAP.minZ)) * MAP.H
   return [mx, my]
 }
 
-function drawMinimap(playerPos, mode) {
+function drawMinimap (playerPos, mode) {
   if (!mapCtx) { initMinimap(); return }
   const ctx = mapCtx
-  ctx.clearRect(0, 0, MAP_W, MAP_H)
+  ctx.clearRect(0, 0, MAP.W, MAP.H)
 
-  // Background
-  ctx.fillStyle = 'rgba(0,5,20,0.95)'
-  ctx.fillRect(0, 0, MAP_W, MAP_H)
+  // Outside background (grass green)
+  ctx.fillStyle = 'rgba(50,90,40,0.5)'
+  ctx.fillRect(0, 0, MAP.W, MAP.H)
 
-  // Zone blocks
-  ZONES.forEach(z => {
-    const [x1, y1] = wToM(SHIP.minX, z.maxZ)
-    const [x2, y2] = wToM(SHIP.maxX, z.minZ)
-    ctx.fillStyle   = z.mapColor
-    ctx.fillRect(x1, y1, x2-x1, y2-y1)
-    ctx.strokeStyle = z.border
-    ctx.lineWidth   = 1
-    ctx.strokeRect(x1+0.5, y1+0.5, x2-x1-1, y2-y1-1)
-    ctx.fillStyle = z.border
-    ctx.font = 'bold 9px Inter, monospace'
-    ctx.textAlign = 'center'
-    ctx.fillText(z.name, (x1+x2)/2, y1+13)
-  })
+  // Building footprint background
+  const [bx1, by1] = wToM(B.minX, B.maxZ)
+  const [bx2, by2] = wToM(B.maxX, B.minZ)
+  ctx.fillStyle = 'rgba(240,235,225,0.25)'
+  ctx.fillRect(bx1, by1, bx2 - bx1, by2 - by1)
 
-  // Doorway gaps
-  const doorways = [
-    { z:  6.5, label: 'Door' },
-    { z: -5.5, label: 'Door' },
+  // Room zone blocks
+  const rooms = [
+    { name: 'LOBBY',       x1: B.minX, x2: B.maxX,  z1: B.lobbyZ, z2: B.maxZ  },
+    { name: 'OPS',         x1: B.minX, x2: B.centerX,z1: B.midZ,   z2: B.lobbyZ },
+    { name: 'FUN',         x1: B.centerX,x2: B.maxX, z1: B.midZ,   z2: B.lobbyZ },
+    { name: 'DESIGN',      x1: B.minX, x2: B.centerX,z1: B.minZ,   z2: B.midZ  },
+    { name: 'ENGINEERING', x1: B.centerX,x2: B.maxX, z1: B.minZ,   z2: B.midZ  },
   ]
-  doorways.forEach(d => {
-    const [lx, ly] = wToM(-1.6, d.z)
-    const [rx]     = wToM( 1.6, d.z)
-    // White gap indicating doorway
-    ctx.fillStyle = 'rgba(255,255,255,0.15)'
-    ctx.fillRect(lx, ly - 4, rx - lx, 8)
-    ctx.strokeStyle = 'rgba(255,255,255,0.5)'
-    ctx.lineWidth = 1
-    ctx.strokeRect(lx, ly - 4, rx - lx, 8)
-    // Door icon
-    ctx.fillStyle  = 'rgba(255,255,255,0.6)'
-    ctx.font       = '7px monospace'
-    ctx.textAlign  = 'center'
-    ctx.fillText('▶◀', (lx+rx)/2, ly + 3)
+  rooms.forEach(r => {
+    const zone = ZONES.find(z => z.name === r.name)
+    if (!zone) return
+    const [rx1, ry1] = wToM(r.x1, r.z2)
+    const [rx2, ry2] = wToM(r.x2, r.z1)
+    ctx.fillStyle   = zone.mapColor
+    ctx.fillRect(rx1, ry1, rx2 - rx1, ry2 - ry1)
+    ctx.strokeStyle = zone.border + '88'
+    ctx.lineWidth   = 1
+    ctx.strokeRect(rx1 + 0.5, ry1 + 0.5, rx2 - rx1 - 1, ry2 - ry1 - 1)
+    // Label
+    ctx.fillStyle = zone.border
+    ctx.font      = 'bold 7px Inter, monospace'
+    ctx.textAlign = 'center'
+    const lx = (rx1 + rx2) / 2, ly = ry1 + 10
+    ctx.fillText(r.name, lx, ly)
   })
 
-  // Ship outline
-  ctx.strokeStyle = 'rgba(100,160,255,0.35)'
+  // Door indicators
+  const doors = [
+    { x: 0,  z: B.maxZ,   label: '🚪' },
+    { x: -11, z: B.lobbyZ, label: '▶' },
+    { x:  11, z: B.lobbyZ, label: '▶' },
+    { x: -11, z: B.midZ,   label: '▶' },
+    { x:  11, z: B.midZ,   label: '▶' },
+  ]
+  doors.forEach(({ x, z, label }) => {
+    const [dx, dy] = wToM(x, z)
+    ctx.fillStyle   = 'rgba(255,255,255,0.7)'
+    ctx.font        = '8px sans-serif'
+    ctx.textAlign   = 'center'
+    ctx.fillText(label, dx, dy + 3)
+  })
+
+  // Building outline
+  ctx.strokeStyle = 'rgba(220,210,190,0.5)'
   ctx.lineWidth   = 1.5
-  ctx.strokeRect(1, 1, MAP_W-2, MAP_H-2)
+  ctx.strokeRect(bx1, by1, bx2 - bx1, by2 - by1)
 
-  // Grid
-  ctx.strokeStyle = 'rgba(255,255,255,0.04)'
-  ctx.lineWidth   = 1
-  for (let gx = MAP_W/4; gx < MAP_W; gx += MAP_W/4) {
-    ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, MAP_H); ctx.stroke()
-  }
-
-  // Overview mode indicator on map
+  // Overview mode tint
   if (mode === 'overview') {
-    ctx.strokeStyle = 'rgba(255,170,0,0.6)'
+    ctx.strokeStyle = 'rgba(255,160,0,0.7)'
     ctx.lineWidth   = 2
-    ctx.strokeRect(2, 2, MAP_W-4, MAP_H-4)
-    ctx.fillStyle = 'rgba(255,170,0,0.15)'
-    ctx.fillRect(2, 2, MAP_W-4, MAP_H-4)
+    ctx.strokeRect(2, 2, MAP.W - 4, MAP.H - 4)
+    ctx.fillStyle = 'rgba(255,160,0,0.06)'
+    ctx.fillRect(2, 2, MAP.W - 4, MAP.H - 4)
   }
 
   // Player dot
   const [px, py] = wToM(playerPos.x, playerPos.z)
-  ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 10
+  ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 8
   ctx.fillStyle   = '#00ffff'
-  ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI*2); ctx.fill()
-
-  // Direction tick
+  ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI * 2); ctx.fill()
   ctx.shadowBlur  = 0
-  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5
-  ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, py - 10); ctx.stroke()
 
   // YOU label
   ctx.fillStyle   = '#fff'
-  ctx.font        = 'bold 8px Inter, monospace'
+  ctx.font        = 'bold 7px Inter, monospace'
   ctx.textAlign   = 'center'
-  ctx.shadowColor = '#0ff'; ctx.shadowBlur = 5
-  ctx.fillText('YOU', px, py - 14)
+  ctx.shadowColor = '#0ff'; ctx.shadowBlur = 4
+  ctx.fillText('YOU', px, py - 8)
   ctx.shadowBlur  = 0
 
-  // Click-to-move hint
-  ctx.fillStyle = 'rgba(255,255,255,0.3)'
-  ctx.font      = '8px Inter, monospace'
+  // Footer hint
+  ctx.fillStyle = 'rgba(255,255,255,0.28)'
+  ctx.font      = '7px Inter, monospace'
   ctx.textAlign = 'center'
-  ctx.fillText('click map to move', MAP_W/2, MAP_H - 5)
+  ctx.fillText('click map to move', MAP.W / 2, MAP.H - 4)
 }
