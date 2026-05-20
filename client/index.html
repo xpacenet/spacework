@@ -223,6 +223,7 @@
         border: 1px solid rgba(100,150,255,0.25);
         border-radius: 10px; overflow: hidden;
         width: 180px;
+        pointer-events: all;
       }
       .minimap-header {
         padding: 6px 10px;
@@ -640,7 +641,7 @@
         </div>
 
         <input class="lobby-input" id="username" type="text" placeholder="Your name" maxlength="20" autofocus />
-        <button class="lobby-btn" id="enter-btn">Board the Ship →</button>
+        <button class="lobby-btn" id="enter-btn">Enter Building →</button>
 
         <!-- IPFS node status in lobby -->
         <div style="margin-top:16px;display:flex;align-items:center;gap:8px;justify-content:center;font-size:0.68rem;color:rgba(255,255,255,0.4);letter-spacing:0.04em">
@@ -693,7 +694,7 @@
 
       <!-- Chat panel -->
       <div id="chat-panel">
-        <div class="chat-header">SHIP CHAT</div>
+        <div class="chat-header">OFFICE CHAT</div>
         <div id="chat-messages"></div>
         <div class="chat-input-row">
           <input id="chat-input" type="text" placeholder="Message…" maxlength="200" autocomplete="off" />
@@ -716,7 +717,7 @@
 
       <!-- Overview overlay -->
       <div id="overview-panel">
-        <div class="overview-banner">🗺 OVERVIEW MODE — Click anywhere on ship to move there &nbsp;|&nbsp; <kbd style="background:rgba(255,255,255,0.1);padding:1px 6px;border-radius:4px;">TAB</kbd> to exit</div>
+        <div class="overview-banner">🗺 OVERVIEW MODE — Click anywhere to move there &nbsp;|&nbsp; <kbd style="background:rgba(255,255,255,0.1);padding:1px 6px;border-radius:4px;">TAB</kbd> to exit</div>
       </div>
 
       <!-- Overview destination ping -->

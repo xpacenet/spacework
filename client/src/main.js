@@ -302,10 +302,11 @@ function startBoarding() {
         openScreen(_nearestScreen)
       }
       if (e.code === 'KeyF' && _nearestDoor) {
-        const isNowOpen = toggleDoor(_nearestDoor.def.id)
-        // For double main door, also toggle its partner leaf
-        if (_nearestDoor.def.id === 'main-left')  toggleDoor('main-right')
-        if (_nearestDoor.def.id === 'main-right')  toggleDoor('main-left')
+        const id = _nearestDoor.def.id
+        // Double door — always toggle both leaves together
+        const isMain = id === 'main-left' || id === 'main-right'
+        const isNowOpen = toggleDoor(isMain ? 'main-left' : id)
+        if (isMain) toggleDoor('main-right')
         showDoorHint(_nearestDoor.def.label, isNowOpen)
       }
     })

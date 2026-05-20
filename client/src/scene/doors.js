@@ -137,12 +137,15 @@ export function buildDoors (scene) {
     knob2.position.z = mo.z - def.d * 0.65
     pivot.add(knob2)
 
-    // Initial rotation = closed
-    pivot.rotation.y = def.closedRY
+    // Main entrance doors start OPEN so players can walk in freely.
+    // Room doors start closed — press F to enter a room.
+    const startOpen = def.id === 'main-left' || def.id === 'main-right'
+    const initRY    = startOpen ? def.openRY : def.closedRY
+    pivot.rotation.y = initRY
     _state[def.id] = {
-      open:      false,
-      targetRY:  def.closedRY,
-      currentRY: def.closedRY,
+      open:      startOpen,
+      targetRY:  initRY,
+      currentRY: initRY,
       pivot,
     }
   })
