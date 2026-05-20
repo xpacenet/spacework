@@ -118,6 +118,19 @@ function startBoarding() {
     // ── Player ────────────────────────────────────────────────────────────
     const player = initPlayer(scene, camera, renderer, updateZoneUI)
 
+    // ── View toggle pill (2D / 3rd / 1st) ────────────────────────────────
+    document.querySelectorAll('.vtbtn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation()
+        dismissStartOverlay()
+        player.setView(btn.dataset.view)
+        // First person needs pointer lock for mouse look
+        if (btn.dataset.view === 'first' && document.pointerLockElement !== renderer.domElement) {
+          renderer.domElement.requestPointerLock()
+        }
+      })
+    })
+
     // ── Pointer lock: opt-in (WASD) — click-to-move works without it ─────
     let _hudStarted = false
     function dismissStartOverlay () {
@@ -132,11 +145,16 @@ function startBoarding() {
     })
     // Clicking the overlay just dismisses it; WASD grants lock on first press
     clickToStart.addEventListener('click', dismissStartOverlay)
-    const MOV_KEYS = new Set(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'])
+    // Arrow keys just move — they never steal the cursor.
+    // Only WASD deliberately enters FPS (pointer-lock) mode.
+    const FPS_KEYS = new Set(['KeyW','KeyA','KeyS','KeyD'])
+    const ALL_MOV  = new Set([...FPS_KEYS,'ArrowUp','ArrowDown','ArrowLeft','ArrowRight'])
     document.addEventListener('keydown', e => {
-      if (!MOV_KEYS.has(e.code)) return
+      if (!ALL_MOV.has(e.code)) return
       dismissStartOverlay()
-      if (document.pointerLockElement !== renderer.domElement) renderer.domElement.requestPointerLock()
+      if (FPS_KEYS.has(e.code) && document.pointerLockElement !== renderer.domElement) {
+        renderer.domElement.requestPointerLock()
+      }
     })
 
     // ── Unified canvas click: screen → navigate to floor ─────────────────

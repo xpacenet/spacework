@@ -172,7 +172,26 @@
         padding: 5px 14px; border-radius: 20px; font-size: 0.75rem; font-weight: 700;
         letter-spacing: 0.1em; border: 1px solid; transition: all 0.3s;
         background: rgba(0,100,255,0.2); border-color: rgba(0,150,255,0.4); color: #4af;
+        display: none;  /* replaced by view-toggle pill */
       }
+
+      /* View-mode toggle pill */
+      #view-toggle {
+        position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
+        display: flex; background: rgba(0,5,20,0.82);
+        border: 1px solid rgba(255,255,255,0.14);
+        border-radius: 24px; overflow: hidden; pointer-events: all;
+        gap: 0;
+      }
+      .vtbtn {
+        padding: 7px 18px; border: none; background: transparent;
+        color: rgba(255,255,255,0.45); font-size: 0.76rem; font-weight: 700;
+        cursor: pointer; font-family: inherit; letter-spacing: 0.07em;
+        transition: all 0.15s; white-space: nowrap;
+      }
+      .vtbtn + .vtbtn { border-left: 1px solid rgba(255,255,255,0.10); }
+      .vtbtn.active   { background: rgba(255,255,255,0.13); color: #fff; }
+      .vtbtn:hover:not(.active) { color: rgba(255,255,255,0.75); }
 
       /* Toast notification */
       #hud-toast {
@@ -710,8 +729,15 @@
         <span id="ipfs-peers"></span>
       </div>
 
-      <!-- Mode badge -->
+      <!-- Mode badge (hidden — replaced by pill below) -->
       <div id="mode-badge">🗺 2D MAP</div>
+
+      <!-- View mode toggle pill -->
+      <div id="view-toggle">
+        <button class="vtbtn active" data-view="overview">🗺 2D MAP</button>
+        <button class="vtbtn"        data-view="third">👤 3RD PERSON</button>
+        <button class="vtbtn"        data-view="first">👁 1ST PERSON</button>
+      </div>
 
       <!-- Toast -->
       <div id="hud-toast"></div>

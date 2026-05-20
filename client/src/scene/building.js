@@ -2,303 +2,410 @@ import * as THREE from 'three'
 
 // ── Building dimensions — shared with collision.js and doors.js ───────────
 export const BLDG = {
-  // Outer footprint
+  // Ground-floor footprint (unchanged — collision depends on these)
   minX: -22,  maxX: 22,   // 44 m wide
-  minZ: -24,  maxZ: 12,   // 36 m deep  (front face = z 12, back = z -24)
+  minZ: -24,  maxZ: 12,   // 36 m deep
 
-  // Heights
-  wallH: 4.5,             // interior ceiling height
-  wallT: 0.28,            // wall/divider thickness
+  // Interior ceiling of navigable ground floor
+  wallH: 4.5,
+  wallT: 0.30,            // slightly thicker — no more micro-seams
 
-  // Interior dividers (z)
-  lobbyZ:  4,             // separates Lobby  ↔ Ops / Fun
-  midZ:   -4,             // separates Ops/Fun ↔ Design / Engineering
-
-  // Left–right split
+  // Interior zone dividers
+  lobbyZ:  4,
+  midZ:   -4,
   centerX: 0,
 
-  // Room door geometry
-  doorH:     2.2,         // opening height
-  doorHalfW: 0.7,         // half of 1.4 m opening
-
-  // Room door X centres
-  leftDoorX:  -11,        // Ops door + Design door
-  rightDoorX:  11,        // Fun door  + Engineering door
-
-  // Main entrance (double door, front wall)
+  // Door geometry
+  doorH:          2.2,
+  doorHalfW:      0.7,
+  leftDoorX:     -11,
+  rightDoorX:     11,
   mainDoorH:      2.6,
-  mainDoorHalfW:  1.5,    // each leaf → 3 m total gap
+  mainDoorHalfW:  1.5,
 }
 
-const B = BLDG  // short alias
+const B = BLDG
 
-// ── Materials ─────────────────────────────────────────────────────────────
-function makeMats () {
-  const ext  = new THREE.MeshStandardMaterial({ color: 0xd4cfc8, roughness: 0.92, metalness: 0.02, side: THREE.DoubleSide })
-  const int_ = new THREE.MeshStandardMaterial({ color: 0xf2ede4, roughness: 0.95, metalness: 0,    side: THREE.DoubleSide })
-  const div  = new THREE.MeshStandardMaterial({ color: 0xeae6dc, roughness: 0.95, metalness: 0,    side: THREE.DoubleSide })
-  const tile = new THREE.MeshStandardMaterial({ color: 0xe2ddd6, roughness: 0.28, metalness: 0.06 })
-  const wood = new THREE.MeshStandardMaterial({ color: 0xc4a882, roughness: 0.82, metalness: 0   })
-  const ceil = new THREE.MeshStandardMaterial({ color: 0xf5f3ef, roughness: 1.0,  metalness: 0   })
-  const roof = new THREE.MeshStandardMaterial({ color: 0x3a3832, roughness: 0.9,  metalness: 0   })
-  const glass= new THREE.MeshStandardMaterial({
-    color: 0xaaddff, roughness: 0.04, metalness: 0.1,
-    transparent: true, opacity: 0.3, side: THREE.DoubleSide,
-  })
-  const frame= new THREE.MeshStandardMaterial({ color: 0x8a8070, roughness: 0.6, metalness: 0.2 })
-  const skirting = new THREE.MeshStandardMaterial({ color: 0xb8b0a4, roughness: 0.7, metalness: 0.1 })
-  return { ext, int: int_, div, tile, wood, ceil, roof, glass, frame, skirting }
-}
-
-// ── Box helper ─────────────────────────────────────────────────────────────
-function box(scene, mat, x, y, z, w, h, d) {
+// ── Convenience box helper ─────────────────────────────────────────────────
+function box (scene, mat, x, y, z, w, h, d) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat)
   m.position.set(x, y, z)
   scene.add(m)
   return m
 }
 
+// ── Materials ─────────────────────────────────────────────────────────────
+function makeMats () {
+  // Exterior — warm off-white concrete panels
+  const ext = new THREE.MeshStandardMaterial({
+    color: 0xd8d2c8, roughness: 0.88, metalness: 0.04, side: THREE.DoubleSide,
+  })
+  // Darker band / spandrel panels between floors
+  const span = new THREE.MeshStandardMaterial({
+    color: 0x52504c, roughness: 0.75, metalness: 0.10,
+  })
+  // Interior walls — bright white
+  const int_ = new THREE.MeshStandardMaterial({
+    color: 0xf5f2ee, roughness: 0.95, metalness: 0,
+  })
+  // Interior dividers — slightly warm white
+  const div = new THREE.MeshStandardMaterial({
+    color: 0xece8e0, roughness: 0.90, metalness: 0,
+  })
+  // Lobby floor — large polished porcelain tile
+  const tile = new THREE.MeshStandardMaterial({
+    color: 0xe0dbd4, roughness: 0.22, metalness: 0.08,
+  })
+  // Office floors — light oak wood
+  const wood = new THREE.MeshStandardMaterial({
+    color: 0xc8a870, roughness: 0.80, metalness: 0,
+  })
+  // Ceiling — matte white
+  const ceil = new THREE.MeshStandardMaterial({
+    color: 0xf6f4f0, roughness: 1.0, metalness: 0,
+  })
+  // Roof membrane — dark grey
+  const roof = new THREE.MeshStandardMaterial({
+    color: 0x3a3830, roughness: 0.90, metalness: 0,
+  })
+  // Aluminium window frames
+  const frame = new THREE.MeshStandardMaterial({
+    color: 0x8c8880, roughness: 0.45, metalness: 0.55,
+  })
+  // Glass — tinted blue-grey
+  const glass = new THREE.MeshStandardMaterial({
+    color: 0x90b8cc, roughness: 0.05, metalness: 0.1,
+    transparent: true, opacity: 0.28, side: THREE.DoubleSide,
+  })
+  // Stair treads — dark concrete
+  const stair = new THREE.MeshStandardMaterial({
+    color: 0x6a6660, roughness: 0.80, metalness: 0.05,
+  })
+  // Steel handrail
+  const rail = new THREE.MeshStandardMaterial({
+    color: 0xa0a0a8, roughness: 0.30, metalness: 0.80,
+  })
+  // Reception desk — dark walnut
+  return { ext, span, int: int_, div, tile, wood, ceil, roof, frame, glass, stair, rail }
+}
+
 // ── Build everything ───────────────────────────────────────────────────────
 export function buildBuilding (scene) {
-  const m = makeMats()
-  const H  = B.wallH          // 4.5
-  const T  = B.wallT          // 0.28
-  const hH = H / 2            // 2.25  (centre y for full-height walls)
+  const mat = makeMats()
+
+  const H  = B.wallH           // 4.5 — interior ceiling
+  const T  = B.wallT           // 0.30
   const W  = B.maxX - B.minX  // 44
   const D  = B.maxZ - B.minZ  // 36
   const cx = 0
-  const cz = (B.minZ + B.maxZ) / 2  // -6
+  const cz = (B.minZ + B.maxZ) / 2
 
-  // ── FLOOR ─────────────────────────────────────────────────────────────
-  // Lobby — polished tile
-  box(scene, m.tile, cx, 0.04, (B.lobbyZ + B.maxZ) / 2,
-      W, 0.08, B.maxZ - B.lobbyZ)
-  // Rooms — wood
-  box(scene, m.wood, cx, 0.04, (B.minZ + B.lobbyZ) / 2,
-      W, 0.08, B.lobbyZ - B.minZ)
+  // ── Exterior shell heights ─────────────────────────────────────────────
+  //   4 storeys × 4.5 m = 18 m  (ground floor is navigable)
+  const FLOORS  = 4
+  const TOTAL_H = H * FLOORS   // 18 m
 
-  // Skirting boards (thin strip at base of all interior walls)
-  const sk = 0.06
-  addSkirting(scene, m.skirting, sk)
+  // ── GROUND FLOOR ──────────────────────────────────────────────────────
+  // Lobby tile
+  box(scene, mat.tile, cx, 0.04, (B.lobbyZ + B.maxZ) / 2, W, 0.08, B.maxZ - B.lobbyZ)
+  // Room wood floors
+  box(scene, mat.wood, cx, 0.04, (B.minZ + B.lobbyZ) / 2, W, 0.08, B.lobbyZ - B.minZ)
 
-  // ── CEILING — hidden in 2D overview so you see into rooms ───────────
-  const ceilMesh = box(scene, m.ceil, cx, H + 0.06, cz,  W + T * 2, 0.12, D + T * 2)
-  ceilMesh.userData.mapHide = true
+  // ── EXTERIOR SHELL (4-storey) ─────────────────────────────────────────
+  // Back wall — full height, unbroken
+  box(scene, mat.ext, cx, TOTAL_H / 2, B.minZ, W, TOTAL_H, T)
 
-  // ── ROOF — hidden in 2D overview ─────────────────────────────────────
-  const roofMesh = box(scene, m.roof, cx, H + 0.55, cz,  W + 1.2, 0.5, D + 1.2)
-  roofMesh.userData.mapHide = true
-  // Parapet edge trim (also roof-level)
-  const _n1 = scene.children.length
-  addParapet(scene, m.ext, W, D, H, T)
-  for (let i = _n1; i < scene.children.length; i++) scene.children[i].userData.mapHide = true
+  // Left wall — full height
+  box(scene, mat.ext, B.minX, TOTAL_H / 2, cz, T, TOTAL_H, D)
 
-  // ── OUTER WALLS ───────────────────────────────────────────────────────
+  // Right wall — full height
+  box(scene, mat.ext, B.maxX, TOTAL_H / 2, cz, T, TOTAL_H, D)
 
-  // Front wall  (z = maxZ = 12) — two side panels + lintel above main door
-  const mW = B.mainDoorHalfW                // 1.5
-  const mH = B.mainDoorH                    // 2.6
-  // Left panel: minX → −mW
-  wallPanel(scene, m.ext,
+  // Front wall:
+  //   Ground floor has the main door gap (-1.5 → +1.5)
+  //   Upper three floors are solid facade
+  const mW = B.mainDoorHalfW   // 1.5
+  const mH = B.mainDoorH       // 2.6
+  const hH = H / 2             // 2.25
+
+  // Ground floor — left panel
+  box(scene, mat.ext,
     (B.minX + (-mW)) / 2, hH, B.maxZ,
     -mW - B.minX, H, T)
-  // Right panel: mW → maxX
-  wallPanel(scene, m.ext,
+  // Ground floor — right panel
+  box(scene, mat.ext,
     (mW + B.maxX) / 2, hH, B.maxZ,
     B.maxX - mW, H, T)
-  // Lintel above main door
-  wallPanel(scene, m.ext,
+  // Lintel above main door (ground floor only)
+  box(scene, mat.ext,
     0, mH + (H - mH) / 2, B.maxZ,
     mW * 2, H - mH, T)
+  // Floors 2-4 — full-width, no gap
+  box(scene, mat.ext,
+    cx, H + (TOTAL_H - H) / 2, B.maxZ,
+    W, TOTAL_H - H, T)
 
-  // Front wall — exterior cladding detail (darker recessed band)
-  box(scene, m.frame, cx, H * 0.72, B.maxZ + T / 2,  W * 0.92, 0.08, 0.04)
+  // ── SPANDREL BANDS + FLOOR LEDGES (mark each storey) ─────────────────
+  for (let f = 1; f < FLOORS; f++) {
+    const y = H * f
+    // Thin horizontal concrete ledge at slab edge (protrudes 0.12 m)
+    box(scene, mat.span, cx,    y + 0.25, B.maxZ - 0.08, W + 0.2, 0.5,  0.14)
+    box(scene, mat.span, cx,    y + 0.25, B.minZ + 0.08, W + 0.2, 0.5,  0.14)
+    box(scene, mat.span, B.minX + 0.06, y + 0.25, cz, 0.14, 0.5, D + 0.2)
+    box(scene, mat.span, B.maxX - 0.06, y + 0.25, cz, 0.14, 0.5, D + 0.2)
+  }
 
-  // Back wall (z = minZ = −24) — full
-  wallPanel(scene, m.ext,
-    cx, hH, B.minZ,
-    W, H, T)
+  // ── WINDOWS — four rows (one per storey) ─────────────────────────────
+  buildWindowGrid(scene, mat)
 
-  // Left wall (x = minX = −22) — full depth
-  wallPanel(scene, m.ext,
-    B.minX, hH, cz,
-    T, H, D, true)
+  // ── ENTRANCE CANOPY + COLUMNS ─────────────────────────────────────────
+  buildEntrance(scene, mat, mW, T)
 
-  // Right wall (x = maxX = 22) — full depth
-  wallPanel(scene, m.ext,
-    B.maxX, hH, cz,
-    T, H, D, true)
+  // ── INTERIOR DIVIDERS (ground floor only) ────────────────────────────
+  //
+  // Rule: each divider segment starts/ends just INSIDE the exterior walls
+  // and just CLEAR of intersecting perpendicular walls.
+  // This eliminates all z-fighting at corners and T-junctions.
+  //
+  const inner = T * 0.5    // clearance so segments don't touch outer wall face
+  const half  = T / 2      // half wall thickness
 
-  // ── WINDOWS on exterior walls ─────────────────────────────────────────
-  addWindows(scene, m)
-
-  // ── INTERIOR DIVIDERS ─────────────────────────────────────────────────
-
-  // Lobby divider (z = lobbyZ = 4) — Ops + Fun door gaps
-  addDividedWall(scene, m.div, 'z', B.lobbyZ, B.minX, B.maxX, H, T,
+  // Lobby divider (z = lobbyZ = 4)  — two door gaps
+  _dividedWallZ(scene, mat.div, B.lobbyZ, B.minX + inner, B.maxX - inner, H, T,
     B.leftDoorX,  B.doorHalfW, B.doorH,
     B.rightDoorX, B.doorHalfW, B.doorH)
 
-  // Mid divider (z = midZ = −4) — Design + Engineering door gaps
-  addDividedWall(scene, m.div, 'z', B.midZ, B.minX, B.maxX, H, T,
+  // Mid divider (z = midZ = -4)  — two door gaps
+  _dividedWallZ(scene, mat.div, B.midZ, B.minX + inner, B.maxX - inner, H, T,
     B.leftDoorX,  B.doorHalfW, B.doorH,
     B.rightDoorX, B.doorHalfW, B.doorH)
 
-  // Centre divider (x = 0, z = minZ → lobbyZ) — left/right room split
-  addDividedWall(scene, m.div, 'x', B.centerX, B.minZ, B.lobbyZ, H, T,
-    null, 0, 0,
-    null, 0, 0)
+  // Centre divider (x = 0)  — split into two segments, clearing the horizontal
+  // dividers so no geometry overlaps at the T-junctions
+  _solidWallX(scene, mat.div, B.centerX,
+    B.minZ + inner,      B.midZ - half,        H, T)
+  _solidWallX(scene, mat.div, B.centerX,
+    B.midZ  + half,      B.lobbyZ - half,      H, T)
 
-  // ── ZONE ACCENT STRIPS (glow trim on floor of each room) ─────────────
-  addZoneStrips(scene)
+  // ── CEILING (hidden in 2D map mode) ──────────────────────────────────
+  const ceilMesh = box(scene, mat.ceil, cx, H + 0.05, cz, W, 0.10, D)
+  ceilMesh.userData.mapHide = true
 
-  // ── INDOOR CEILING LIGHTS — hidden in 2D ─────────────────────────────
+  // ── ROOF + PARAPET ────────────────────────────────────────────────────
+  const _n1 = scene.children.length
+  box(scene, mat.roof, cx, TOTAL_H + 0.30, cz, W + 1.0, 0.60, D + 1.0)
+  // Parapet
+  _addParapet(scene, mat.ext, W, D, TOTAL_H)
+  for (let i = _n1; i < scene.children.length; i++) scene.children[i].userData.mapHide = true
+
+  // ── LOBBY STAIRCASE (visual, decorative) ─────────────────────────────
+  buildStaircase(scene, mat)
+
+  // ── ZONE ACCENT STRIPS (glowing floor trim) ───────────────────────────
+  _addZoneStrips(scene)
+
+  // ── CEILING LIGHTS ────────────────────────────────────────────────────
   const _n2 = scene.children.length
-  addCeilingLights(scene, H)
+  _addCeilingLights(scene, H)
   for (let i = _n2; i < scene.children.length; i++) scene.children[i].userData.mapHide = true
 
-  // ── ROOM FLOOR LABELS — shown only in 2D overview ─────────────────────
+  // ── ROOM FLOOR LABELS (visible only in 2D map mode) ──────────────────
   const _n3 = scene.children.length
-  addRoomLabels(scene)
+  _addRoomLabels(scene)
   for (let i = _n3; i < scene.children.length; i++) scene.children[i].userData.mapShow = true
 }
 
-// ── Wall panel (faces +Z or +X direction) ─────────────────────────────────
-function wallPanel (scene, mat, x, y, z, w, h, t, isXWall = false) {
-  const geo = isXWall
-    ? new THREE.BoxGeometry(t, h, w)
-    : new THREE.BoxGeometry(w, h, t)
-  const mesh = new THREE.Mesh(geo, mat)
-  mesh.position.set(x, y, z)
-  scene.add(mesh)
-}
+// ── Window grid — 4 rows of windows on every exterior face ────────────────
+function buildWindowGrid (scene, mat) {
+  const winW = 2.2, winH = 1.6, frameD = 0.08
 
-// ── Wall with two door gaps and lintels ───────────────────────────────────
-// axis='z': wall at constant z, spanning x from rangeMin→rangeMax
-// axis='x': wall at constant x, spanning z from rangeMin→rangeMax
-// Pass null doorCenter to skip a door
-function addDividedWall (scene, mat, axis, wallPos,
-  rangeMin, rangeMax, wallH, wallT,
-  door1Centre, door1HalfW, door1H,
-  door2Centre, door2HalfW, door2H) {
+  function addWin (x, y, z, rotY) {
+    // Aluminium frame
+    const f = new THREE.Mesh(
+      new THREE.BoxGeometry(winW + 0.16, winH + 0.12, frameD),
+      mat.frame
+    )
+    f.position.set(x, y, z); f.rotation.y = rotY; scene.add(f)
+    // Glass pane
+    const g = new THREE.Mesh(
+      new THREE.PlaneGeometry(winW, winH),
+      mat.glass
+    )
+    g.position.set(x, y, z); g.rotation.y = rotY; scene.add(g)
+  }
 
-  const hH = wallH / 2
+  const H = B.wallH
+  // Window vertical centres: one per storey, at 60% of floor height
+  const winYs = [0, 1, 2, 3].map(f => f * H + H * 0.60)
 
-  const segments = []
-  let cursor = rangeMin
-
-  const doors = []
-  if (door1Centre !== null) doors.push({ c: door1Centre, hw: door1HalfW, dh: door1H })
-  if (door2Centre !== null) doors.push({ c: door2Centre, hw: door2HalfW, dh: door2H })
-  doors.sort((a, b) => a.c - b.c)
-
-  doors.forEach(({ c, hw, dh }) => {
-    const gMin = c - hw
-    const gMax = c + hw
-    if (gMin > cursor) segments.push({ from: cursor, to: gMin, full: true })
-    // Lintel above door
-    segments.push({ from: gMin, to: gMax, full: false, dh })
-    cursor = gMax
+  // Left exterior wall (x = minX, face inward rotY=+π/2)
+  winYs.forEach(wy => {
+    [-16, -6, 8].forEach(wz => addWin(B.minX, wy, wz,  Math.PI / 2))
   })
-  if (cursor < rangeMax) segments.push({ from: cursor, to: rangeMax, full: true })
-
-  segments.forEach(({ from, to, full, dh }) => {
-    const len = to - from
-    const mid = (from + to) / 2
-    if (full) {
-      // Full-height panel
-      addAxisBox(scene, mat, axis, wallPos, mid, hH, len, wallH, wallT)
+  // Right exterior wall
+  winYs.forEach(wy => {
+    [-16, -6, 8].forEach(wz => addWin(B.maxX, wy, wz, -Math.PI / 2))
+  })
+  // Back wall
+  winYs.forEach(wy => {
+    [-14, 0, 14].forEach(wx => addWin(wx, wy, B.minZ, Math.PI))
+  })
+  // Front wall — flanking entrance on ground floor, full grid above
+  winYs.forEach((wy, fi) => {
+    if (fi === 0) {
+      // Ground floor: only flanking windows
+      addWin(-14, wy, B.maxZ, 0)
+      addWin( 14, wy, B.maxZ, 0)
     } else {
-      // Lintel only (above door opening)
-      const lintH = wallH - dh
-      addAxisBox(scene, mat, axis, wallPos, mid, dh + lintH / 2, len, lintH, wallT)
+      // Upper floors: full row
+      [-14, -6, 6, 14].forEach(wx => addWin(wx, wy, B.maxZ, 0))
     }
   })
 }
 
-// Helper: add a box for z-axis or x-axis wall
-function addAxisBox (scene, mat, axis, wallPos, midAlong, midY, lenAlong, h, t) {
-  let geo, x, z
-  if (axis === 'z') {
-    geo = new THREE.BoxGeometry(lenAlong, h, t)
-    x = midAlong; z = wallPos
-  } else {
-    geo = new THREE.BoxGeometry(t, h, lenAlong)
-    x = wallPos;  z = midAlong
-  }
-  const mesh = new THREE.Mesh(geo, mat)
-  mesh.position.set(x, midY, z)
-  scene.add(mesh)
+// ── Entrance canopy + flanking columns ───────────────────────────────────
+function buildEntrance (scene, mat, mW, T) {
+  // Two flanking columns
+  ;[-mW - 0.4, mW + 0.4].forEach(x => {
+    // Column shaft
+    const col = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.22, 0.22, B.mainDoorH, 12),
+      mat.ext
+    )
+    col.position.set(x, B.mainDoorH / 2, B.maxZ + 0.5)
+    scene.add(col)
+  })
+  // Flat canopy slab
+  box(scene, mat.span,
+    0, B.mainDoorH + 0.18, B.maxZ + 0.7,
+    mW * 2 + 2.4, 0.35, 1.8)
+  // Canopy soffit underside (white)
+  box(scene, mat.int,
+    0, B.mainDoorH, B.maxZ + 0.7,
+    mW * 2 + 2.2, 0.02, 1.7)
 }
 
-// ── Windows on exterior walls ──────────────────────────────────────────────
-function addWindows (scene, m) {
-  const winW = 1.8, winH = 1.2, winY = 1.8
-  const T = 0.04  // glass thickness
-  const fT = 0.06 // frame depth
+// ── Decorative staircase in lobby ─────────────────────────────────────────
+// Two flights, one on each side of the lobby, leading to "upper floors"
+function buildStaircase (scene, mat) {
+  const STEPS   = 9
+  const stepW   = 0.28   // tread depth
+  const stepH   = 0.22   // riser height
+  const stepLen = 3.0    // staircase width
 
-  const addWin = (x, z, rotY) => {
-    // Frame
-    const fg = new THREE.Mesh(new THREE.BoxGeometry(winW + 0.12, winH + 0.12, fT), m.frame)
-    fg.position.set(x, winY + winH / 2, z)
-    fg.rotation.y = rotY
-    scene.add(fg)
-    // Glass
-    const gl = new THREE.Mesh(new THREE.PlaneGeometry(winW, winH), m.glass)
-    gl.position.set(x, winY + winH / 2, z)
-    gl.rotation.y = rotY
-    scene.add(gl)
+  // Right-side staircase (x = 16–19, z = 5–9)
+  const rx = 16.5, rz = 5.5
+  for (let i = 0; i < STEPS; i++) {
+    box(scene, mat.stair,
+      rx,
+      stepH * (i + 0.5),
+      rz + stepW * (i + 0.5),
+      stepLen, stepH, stepW
+    )
   }
+  // Handrail posts
+  for (let i = 0; i < STEPS; i += 2) {
+    box(scene, mat.rail, rx - stepLen / 2 + 0.1, stepH * i + 0.55, rz + stepW * i, 0.06, 1.1, 0.06)
+    box(scene, mat.rail, rx + stepLen / 2 - 0.1, stepH * i + 0.55, rz + stepW * i, 0.06, 1.1, 0.06)
+  }
+  // Handrail bar
+  box(scene, mat.rail,
+    rx, stepH * STEPS * 0.5 + 0.55, rz + stepW * STEPS * 0.5,
+    stepLen, 0.06, stepW * STEPS + 0.1)
 
-  const B = BLDG
-  // Left exterior wall (x = minX, windows face inward so rotY=π/2)
-  addWin(B.minX, -16, Math.PI / 2)
-  addWin(B.minX,  -6, Math.PI / 2)
-  addWin(B.minX,   8, Math.PI / 2)
-
-  // Right exterior wall
-  addWin(B.maxX, -16, -Math.PI / 2)
-  addWin(B.maxX,  -6, -Math.PI / 2)
-  addWin(B.maxX,   8, -Math.PI / 2)
-
-  // Back wall
-  addWin(-12, B.minZ, Math.PI)
-  addWin( 12, B.minZ, Math.PI)
-
-  // Front wall — flanking main entrance
-  addWin(-11, B.maxZ, 0)
-  addWin( 11, B.maxZ, 0)
+  // Left-side staircase (mirror)
+  const lx = -16.5
+  for (let i = 0; i < STEPS; i++) {
+    box(scene, mat.stair,
+      lx, stepH * (i + 0.5), rz + stepW * (i + 0.5),
+      stepLen, stepH, stepW
+    )
+  }
+  for (let i = 0; i < STEPS; i += 2) {
+    box(scene, mat.rail, lx - stepLen / 2 + 0.1, stepH * i + 0.55, rz + stepW * i, 0.06, 1.1, 0.06)
+    box(scene, mat.rail, lx + stepLen / 2 - 0.1, stepH * i + 0.55, rz + stepW * i, 0.06, 1.1, 0.06)
+  }
+  box(scene, mat.rail,
+    lx, stepH * STEPS * 0.5 + 0.55, rz + stepW * STEPS * 0.5,
+    stepLen, 0.06, stepW * STEPS + 0.1)
 }
 
-// ── Parapet edge trim around roof ─────────────────────────────────────────
-function addParapet (scene, mat, W, D, H, T) {
-  const pW = W + 1.0, pD = D + 1.0, pH = 0.4, pT = 0.22, y = H + 0.85
-  // Four sides
-  const add = (x, z, w, d) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, pH, d), mat)
-    m.position.set(x, y, z)
-    scene.add(m)
-  }
-  const hW = pW / 2, hD = pD / 2
-  add(0,    -hD + pT / 2,  pW,  pT)  // front
-  add(0,     hD - pT / 2,  pW,  pT)  // back
-  add(-hW + pT / 2, 0,  pT, pD)  // left
-  add( hW - pT / 2, 0,  pT, pD)  // right
+// ── Divided wall along Z (horizontal divider with door gaps) ──────────────
+function _dividedWallZ (scene, mat, wallZ, xMin, xMax, wallH, wallT,
+  d1cx, d1hw, d1h, d2cx, d2hw, d2h) {
+
+  const hH   = wallH / 2
+  const segs = []
+  let cursor = xMin
+
+  const doors = []
+  if (d1cx !== null) doors.push({ c: d1cx, hw: d1hw, dh: d1h })
+  if (d2cx !== null) doors.push({ c: d2cx, hw: d2hw, dh: d2h })
+  doors.sort((a, b) => a.c - b.c)
+
+  doors.forEach(({ c, hw, dh }) => {
+    const gMin = c - hw, gMax = c + hw
+    if (gMin > cursor) segs.push({ from: cursor, to: gMin, full: true })
+    segs.push({ from: gMin, to: gMax, full: false, dh })
+    cursor = gMax
+  })
+  if (cursor < xMax) segs.push({ from: cursor, to: xMax, full: true })
+
+  segs.forEach(({ from, to, full, dh }) => {
+    const len = to - from
+    const mid = (from + to) / 2
+    if (full) {
+      box(scene, mat, mid, hH, wallZ, len, wallH, wallT)
+    } else {
+      // Lintel only — above the door opening
+      const lintH = wallH - dh
+      box(scene, mat, mid, dh + lintH / 2, wallZ, len, lintH, wallT)
+    }
+  })
 }
 
-// ── Zone accent floor strips ───────────────────────────────────────────────
-function addZoneStrips (scene) {
-  const ZONES = [
-    { color: 0xff6ba0, x: B.minX + 0.05, z1: B.midZ,   z2: B.lobbyZ   },  // Ops  (pink)
-    { color: 0x44ffaa, x: B.maxX - 0.05, z1: B.midZ,   z2: B.lobbyZ   },  // Fun  (green)
-    { color: 0xff9944, x: B.minX + 0.05, z1: B.minZ,   z2: B.midZ     },  // Design (amber)
-    { color: 0x44aaff, x: B.maxX - 0.05, z1: B.minZ,   z2: B.midZ     },  // Engineering (blue)
-    { color: 0xffffff, x: 0,             z1: B.lobbyZ, z2: B.maxZ - 1 },  // Lobby (white)
+// ── Solid wall along X axis (no doors) ───────────────────────────────────
+function _solidWallX (scene, mat, wallX, zMin, zMax, wallH, wallT) {
+  const len = zMax - zMin
+  if (len <= 0) return
+  const m = new THREE.Mesh(
+    new THREE.BoxGeometry(wallT, wallH, len),
+    mat
+  )
+  m.position.set(wallX, wallH / 2, (zMin + zMax) / 2)
+  scene.add(m)
+}
+
+// ── Parapet trim around flat roof ─────────────────────────────────────────
+function _addParapet (scene, mat, W, D, topY) {
+  const pT  = 0.28
+  const pH  = 0.55
+  const y   = topY + pH / 2 + 0.05
+  const midZ = (B.minZ + B.maxZ) / 2
+  const sides = [
+    [0,         y, B.maxZ + 0.05, W + 0.6, pH, pT],
+    [0,         y, B.minZ - 0.05, W + 0.6, pH, pT],
+    [B.minX - 0.05, y, midZ, pT, pH, D + 0.6],
+    [B.maxX + 0.05, y, midZ, pT, pH, D + 0.6],
   ]
-  ZONES.forEach(({ color, x, z1, z2 }) => {
+  sides.forEach(([x, py, z, w, h, d]) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat)
+    m.position.set(x, py, z); scene.add(m)
+  })
+}
+
+// ── Zone accent glowing strips ────────────────────────────────────────────
+function _addZoneStrips (scene) {
+  const strips = [
+    { color: 0xff6ba0, x: B.minX + 0.06, z1: B.midZ,   z2: B.lobbyZ,   label: 'OPS'   },
+    { color: 0x44ffaa, x: B.maxX - 0.06, z1: B.midZ,   z2: B.lobbyZ,   label: 'FUN'   },
+    { color: 0xff9944, x: B.minX + 0.06, z1: B.minZ,   z2: B.midZ,     label: 'DESIGN' },
+    { color: 0x44aaff, x: B.maxX - 0.06, z1: B.minZ,   z2: B.midZ,     label: 'ENG'   },
+    { color: 0xffffff, x: 0,             z1: B.lobbyZ, z2: B.maxZ - 1, label: 'LOBBY' },
+  ]
+  strips.forEach(({ color, x, z1, z2 }) => {
     const mat = new THREE.MeshStandardMaterial({
-      color, emissive: color, emissiveIntensity: 1.2,
-      roughness: 0.2,
+      color, emissive: color, emissiveIntensity: 1.2, roughness: 0.2,
     })
     const d = z2 - z1
     const m = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, d), mat)
@@ -307,28 +414,24 @@ function addZoneStrips (scene) {
   })
 }
 
-// ── Skirting boards ────────────────────────────────────────────────────────
-function addSkirting (scene, mat, h) {
-  const B = BLDG, T = 0.06, y = h / 2
-  const add = (x, z, w, d) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat)
-    m.position.set(x, y, z)
+// ── Ceiling light housings ─────────────────────────────────────────────────
+function _addCeilingLights (scene, H) {
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xfff9ee, emissive: 0xfff5dd, emissiveIntensity: 1.6, roughness: 0.5,
+  })
+  ;[
+    [0, 8], [-10, 8], [10, 8],
+    [-11, 0], [11, 0],
+    [-11, -14], [11, -14],
+  ].forEach(([x, z]) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.04, 1.4), mat)
+    m.position.set(x, H - 0.03, z)
     scene.add(m)
-  }
-  const W = B.maxX - B.minX, D = B.maxZ - B.minZ
-  // Outer walls interior base
-  add(0,     B.maxZ - T / 2, W,     T)
-  add(0,     B.minZ + T / 2, W,     T)
-  add(B.minX + T / 2, (B.minZ + B.maxZ) / 2, T, D)
-  add(B.maxX - T / 2, (B.minZ + B.maxZ) / 2, T, D)
-  // Dividers
-  add(0, B.lobbyZ - T / 2, W, T)
-  add(0, B.midZ   + T / 2, W, T)
-  add(B.centerX, (B.minZ + B.lobbyZ) / 2, T, B.lobbyZ - B.minZ)
+  })
 }
 
-// ── Room floor labels — flat decals visible from above in 2D map mode ────────
-function addRoomLabels (scene) {
+// ── Room floor labels (2D map mode only) ─────────────────────────────────
+function _addRoomLabels (scene) {
   const rooms = [
     { name: 'LOBBY',       color: '#cccccc', x:  0,   z:  8,   w: 16, d:  5 },
     { name: 'OPS',         color: '#ffaa44', x: -11,  z:  0,   w: 12, d:  6 },
@@ -340,50 +443,19 @@ function addRoomLabels (scene) {
     const cvs = document.createElement('canvas')
     cvs.width = 512; cvs.height = 256
     const ctx = cvs.getContext('2d')
-    // Subtle tinted fill
-    ctx.fillStyle = color + '18'
-    ctx.fillRect(0, 0, 512, 256)
-    // Glowing border
-    ctx.strokeStyle = color
-    ctx.lineWidth   = 10
+    ctx.fillStyle = color + '18'; ctx.fillRect(0, 0, 512, 256)
+    ctx.strokeStyle = color; ctx.lineWidth = 10
     ctx.strokeRect(6, 6, 500, 244)
-    // Room name
-    ctx.fillStyle  = color
-    ctx.font       = 'bold 72px Inter, Arial, sans-serif'
-    ctx.textAlign  = 'center'
-    ctx.textBaseline = 'middle'
+    ctx.fillStyle = color
+    ctx.font = 'bold 72px Inter, Arial, sans-serif'
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
     ctx.fillText(name, 256, 128)
-
     const mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(w, d),
-      new THREE.MeshBasicMaterial({
-        map: new THREE.CanvasTexture(cvs),
-        transparent: true, depthWrite: false,
-      })
+      new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cvs), transparent: true, depthWrite: false })
     )
-    mesh.rotation.x = -Math.PI / 2   // lay flat on floor
-    mesh.position.set(x, 0.15, z)    // just above floor surface
+    mesh.rotation.x = -Math.PI / 2
+    mesh.position.set(x, 0.15, z)
     scene.add(mesh)
-  })
-}
-
-// ── Ceiling light housings ─────────────────────────────────────────────────
-function addCeilingLights (scene, H) {
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0xfff8ee, emissive: 0xfff5dd, emissiveIntensity: 1.5,
-    roughness: 0.6,
-  })
-  const positions = [
-    // Lobby
-    [  0,  8 ], [ -10,  8 ], [ 10,  8 ],
-    // Ops / Fun
-    [ -11, 0 ], [ 11, 0 ],
-    // Design / Eng
-    [ -11,-14 ], [ 11,-14 ],
-  ]
-  positions.forEach(([x, z]) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.04, 1.2), mat)
-    m.position.set(x, H - 0.03, z)
-    scene.add(m)
   })
 }

@@ -53,6 +53,8 @@ export function initPlayer (scene, camera, renderer, onZoneChange) {
   function applyModeVisibility (m) {
     _mapHide.forEach(o => { o.visible = m !== 'overview' })
     _mapShow.forEach(o => { o.visible = m === 'overview'  })
+    // Hide avatar body in first person so it doesn't block the view
+    avatar.visible = m !== 'first'
   }
 
   initMapClick(controls, avatar)
@@ -69,7 +71,7 @@ export function initPlayer (scene, camera, renderer, onZoneChange) {
     const badge = document.getElementById('mode-badge')
     if (!badge) return
     const m = controls.getMode()
-    badge.textContent   = m === 'overview' ? '🗺 2D MAP' : '🔮 3D VIEW'
+    badge.textContent   = m === 'overview' ? '🗺 2D MAP' : m === 'first' ? '👁 1ST PERSON' : '👤 3RD PERSON'
     badge.style.background   = m === 'overview' ? 'rgba(255,160,0,0.2)' : 'rgba(0,100,255,0.2)'
     badge.style.borderColor  = m === 'overview' ? 'rgba(255,160,0,0.4)' : 'rgba(0,150,255,0.4)'
     badge.style.color        = m === 'overview' ? '#ffaa00' : '#4af'
@@ -94,6 +96,7 @@ export function initPlayer (scene, camera, renderer, onZoneChange) {
     getRotation:  () => avatar.rotation.clone(),
     navigate:     (dest) => controls.navigate(dest),
     isDragMoved:  () => controls.isDragMoved(),
+    setView:      (m)    => { controls.setMode(m); applyModeVisibility(m) },
   }
 }
 
