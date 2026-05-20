@@ -9,7 +9,7 @@ const CAM_LERP   = 0.1
 export function setupControls (avatar, camera, domElement) {
   const keys = {}
   let yaw        = Math.PI   // face toward building on spawn
-  let mode       = 'third'   // 'third' | 'overview'
+  let mode       = 'overview'   // start in 2D map — TAB switches to 3D
   let navPath    = []
   let navIdx     = 0
   let autoMoving = false
@@ -92,9 +92,11 @@ export function setupControls (avatar, camera, domElement) {
     let isMoving = false
 
     if (mode === 'overview') {
-      // Bird-eye camera
-      _camT.set(avatar.position.x, 28, avatar.position.z + 2)
-      camera.position.lerp(_camT, 0.06)
+      // True top-down 2D-map camera — look straight down over the building
+      _camT.set(avatar.position.x, 38, avatar.position.z + 1)
+      // Snap fast on first frame (camera is far away), ease smoothly after
+      const camLerp = camera.position.distanceTo(_camT) > 22 ? 0.18 : 0.06
+      camera.position.lerp(_camT, camLerp)
       camera.lookAt(avatar.position.x, 0, avatar.position.z)
 
       if (autoMoving && navPath.length > 0) {
@@ -181,6 +183,9 @@ export function setupControls (avatar, camera, domElement) {
 
     return isMoving
   }
+
+  // Initialise UI to match starting mode (overview panel, etc.)
+  setMode(mode)
 
   return {
     update,

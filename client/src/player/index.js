@@ -37,6 +37,23 @@ export function initPlayer (scene, camera, renderer, onZoneChange) {
   const controls  = setupControls(avatar, camera, renderer.domElement)
   const clock     = new THREE.Clock()
   let currentZone = ''
+  let _lastMode   = controls.getMode()
+
+  // Collect meshes to show/hide based on 2D↔3D mode
+  const _mapHide = []   // hidden in 2D overview (ceiling, roof, etc.)
+  const _mapShow = []   // shown  in 2D overview only (room labels)
+  scene.traverse(o => {
+    if (o.userData.mapHide) _mapHide.push(o)
+    if (o.userData.mapShow) _mapShow.push(o)
+  })
+  // Apply initial state (starts in overview)
+  _mapHide.forEach(o => { o.visible = false })
+  _mapShow.forEach(o => { o.visible = true  })
+
+  function applyModeVisibility (m) {
+    _mapHide.forEach(o => { o.visible = m !== 'overview' })
+    _mapShow.forEach(o => { o.visible = m === 'overview'  })
+  }
 
   initMapClick(controls, avatar)
 
@@ -52,7 +69,7 @@ export function initPlayer (scene, camera, renderer, onZoneChange) {
     const badge = document.getElementById('mode-badge')
     if (!badge) return
     const m = controls.getMode()
-    badge.textContent   = m === 'overview' ? '🗺 OVERVIEW' : '🎮 EXPLORE'
+    badge.textContent   = m === 'overview' ? '🗺 2D MAP' : '🔮 3D VIEW'
     badge.style.background   = m === 'overview' ? 'rgba(255,160,0,0.2)' : 'rgba(0,100,255,0.2)'
     badge.style.borderColor  = m === 'overview' ? 'rgba(255,160,0,0.4)' : 'rgba(0,150,255,0.4)'
     badge.style.color        = m === 'overview' ? '#ffaa00' : '#4af'
@@ -65,7 +82,10 @@ export function initPlayer (scene, camera, renderer, onZoneChange) {
     animateWalk(avatar, moving, delta)
     detectZone()
     updateModeBadge()
-    drawMinimap(avatar.position, controls.getMode())
+    // Toggle ceiling/labels when player switches between 2D and 3D
+    const m = controls.getMode()
+    if (m !== _lastMode) { _lastMode = m; applyModeVisibility(m) }
+    drawMinimap(avatar.position, m)
   }
   tick()
 

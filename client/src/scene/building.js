@@ -81,13 +81,17 @@ export function buildBuilding (scene) {
   const sk = 0.06
   addSkirting(scene, m.skirting, sk)
 
-  // ── CEILING ───────────────────────────────────────────────────────────
-  box(scene, m.ceil, cx, H + 0.06, cz,  W + T * 2, 0.12, D + T * 2)
+  // ── CEILING — hidden in 2D overview so you see into rooms ───────────
+  const ceilMesh = box(scene, m.ceil, cx, H + 0.06, cz,  W + T * 2, 0.12, D + T * 2)
+  ceilMesh.userData.mapHide = true
 
-  // ── ROOF ──────────────────────────────────────────────────────────────
-  box(scene, m.roof, cx, H + 0.55, cz,  W + 1.2, 0.5, D + 1.2)
-  // Parapet edge trim
+  // ── ROOF — hidden in 2D overview ─────────────────────────────────────
+  const roofMesh = box(scene, m.roof, cx, H + 0.55, cz,  W + 1.2, 0.5, D + 1.2)
+  roofMesh.userData.mapHide = true
+  // Parapet edge trim (also roof-level)
+  const _n1 = scene.children.length
   addParapet(scene, m.ext, W, D, H, T)
+  for (let i = _n1; i < scene.children.length; i++) scene.children[i].userData.mapHide = true
 
   // ── OUTER WALLS ───────────────────────────────────────────────────────
 
@@ -148,8 +152,15 @@ export function buildBuilding (scene) {
   // ── ZONE ACCENT STRIPS (glow trim on floor of each room) ─────────────
   addZoneStrips(scene)
 
-  // ── INDOOR CEILING LIGHTS (recessed squares) ─────────────────────────
+  // ── INDOOR CEILING LIGHTS — hidden in 2D ─────────────────────────────
+  const _n2 = scene.children.length
   addCeilingLights(scene, H)
+  for (let i = _n2; i < scene.children.length; i++) scene.children[i].userData.mapHide = true
+
+  // ── ROOM FLOOR LABELS — shown only in 2D overview ─────────────────────
+  const _n3 = scene.children.length
+  addRoomLabels(scene)
+  for (let i = _n3; i < scene.children.length; i++) scene.children[i].userData.mapShow = true
 }
 
 // ── Wall panel (faces +Z or +X direction) ─────────────────────────────────
@@ -314,6 +325,46 @@ function addSkirting (scene, mat, h) {
   add(0, B.lobbyZ - T / 2, W, T)
   add(0, B.midZ   + T / 2, W, T)
   add(B.centerX, (B.minZ + B.lobbyZ) / 2, T, B.lobbyZ - B.minZ)
+}
+
+// ── Room floor labels — flat decals visible from above in 2D map mode ────────
+function addRoomLabels (scene) {
+  const rooms = [
+    { name: 'LOBBY',       color: '#cccccc', x:  0,   z:  8,   w: 16, d:  5 },
+    { name: 'OPS',         color: '#ffaa44', x: -11,  z:  0,   w: 12, d:  6 },
+    { name: 'FUN',         color: '#44ffaa', x:  11,  z:  0,   w: 12, d:  6 },
+    { name: 'DESIGN',      color: '#ff6ba0', x: -11,  z: -14,  w: 14, d: 10 },
+    { name: 'ENGINEERING', color: '#44aaff', x:  11,  z: -14,  w: 14, d: 10 },
+  ]
+  rooms.forEach(({ name, color, x, z, w, d }) => {
+    const cvs = document.createElement('canvas')
+    cvs.width = 512; cvs.height = 256
+    const ctx = cvs.getContext('2d')
+    // Subtle tinted fill
+    ctx.fillStyle = color + '18'
+    ctx.fillRect(0, 0, 512, 256)
+    // Glowing border
+    ctx.strokeStyle = color
+    ctx.lineWidth   = 10
+    ctx.strokeRect(6, 6, 500, 244)
+    // Room name
+    ctx.fillStyle  = color
+    ctx.font       = 'bold 72px Inter, Arial, sans-serif'
+    ctx.textAlign  = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(name, 256, 128)
+
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, d),
+      new THREE.MeshBasicMaterial({
+        map: new THREE.CanvasTexture(cvs),
+        transparent: true, depthWrite: false,
+      })
+    )
+    mesh.rotation.x = -Math.PI / 2   // lay flat on floor
+    mesh.position.set(x, 0.15, z)    // just above floor surface
+    scene.add(mesh)
+  })
 }
 
 // ── Ceiling light housings ─────────────────────────────────────────────────
