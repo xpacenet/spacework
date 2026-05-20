@@ -151,7 +151,7 @@ export function setupControls (avatar, camera, domElement) {
 
       camera.position.set(avatar.position.x, EYE_HEIGHT, avatar.position.z)
       camera.rotation.order = 'YXZ'
-      camera.rotation.set(pitch, Math.PI - yaw, 0)
+      camera.rotation.set(pitch, Math.PI + yaw, 0)
     }
 
     return isMoving
