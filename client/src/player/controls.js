@@ -1,22 +1,32 @@
 import * as THREE from 'three'
-import { resolveCollision, buildPath } from './collision.js'
+import { resolveCollision, buildPath, STATIC_WALLS } from './collision.js'
 
 const WALK_SPEED = 5.5
 const CAM_DIST   = 5.0   // 3rd-person follow distance
 const CAM_HEIGHT = 2.6
-const CAM_LERP   = 0.10
+// CAM_LERP is computed per-frame as 1 - exp(-CAM_LAG * delta) so the
+// camera feel is identical at 30 fps, 60 fps, and 144 fps.
+const CAM_LAG    = 14   // higher = snappier follow
 const EYE_HEIGHT = 1.65  // 1st-person eye height
 
 export function setupControls (avatar, camera, domElement) {
   const keys = {}
   let yaw        = Math.PI      // faces building at spawn
   let pitch      = 0            // vertical look (1st person)
-  let mode       = 'overview'   // 'overview' | 'third' | 'first'
+  let mode       = 'flat'        // 'flat' | 'overview' | 'third' | 'first'
   let navPath    = []
   let navIdx     = 0
   let autoMoving = false
   let _dragging  = false
   let _dragMoved = false
+  let camPitch   = 0.28   // 3rd-person vertical arm angle (rad). 0 = level, π/2 = top-down
+                           // default ~16° gives a comfortable over-the-shoulder view
+
+  // ── Overview free-camera pan / zoom ───────────────────────────────────────
+  let _ovCamX    = 0      // world-space look-at position for overview
+  let _ovCamZ    = 22     // starts at avatar spawn
+  let _ovZoom    = 38     // camera height (lower = zoomed in)
+  let _ovPanned  = false  // true while user has manually panned away
 
   // ── Keyboard ──────────────────────────────────────────────────────────────
   document.addEventListener('keydown', e => {
@@ -27,10 +37,10 @@ export function setupControls (avatar, camera, domElement) {
       navPath = []; autoMoving = false
       _showToast('Respawned at Entrance')
     }
-    // TAB cycles through all three views
+    // TAB cycles through all four views
     if (e.code === 'Tab') {
       e.preventDefault()
-      const order = ['overview','third','first']
+      const order = ['flat','overview','third','first']
       setMode(order[(order.indexOf(mode) + 1) % order.length])
     }
     if (e.code === 'Escape' && mode !== 'third') setMode('third')
@@ -46,19 +56,59 @@ export function setupControls (avatar, camera, domElement) {
       }
       return
     }
-    if (_dragging && (mode === 'third' || mode === 'first')) {
-      yaw -= e.movementX * 0.005
-      if (Math.abs(e.movementX) > 2 || Math.abs(e.movementY) > 2) _dragMoved = true
+    if (_dragging) {
+      if (mode === 'overview') {
+        // Pan the bird's-eye camera independently of the avatar
+        // Scale converts pixels → world units based on current zoom height + FOV
+        // 0.9 coefficient slows pan to feel deliberate (not racing across world)
+        const scale = (_ovZoom * 1.534 * 0.9) / window.innerHeight
+        _ovCamX += e.movementX * scale
+        _ovCamZ -= e.movementY * scale
+        // Clamp so you can't pan to infinity
+        _ovCamX = Math.max(-60, Math.min(60, _ovCamX))
+        _ovCamZ = Math.max(-60, Math.min(60, _ovCamZ))
+        _ovPanned = true
+        if (Math.abs(e.movementX) > 2 || Math.abs(e.movementY) > 2) _dragMoved = true
+      } else if (mode === 'third') {
+        // 3rd person: horizontal drag orbits yaw, vertical drag tilts pitch
+        yaw      -= e.movementX * 0.005
+        camPitch  = Math.max(-0.05, Math.min(1.0, camPitch + e.movementY * 0.003))
+        if (Math.abs(e.movementX) > 2 || Math.abs(e.movementY) > 2) _dragMoved = true
+      } else {
+        // 1st person fallback (pointer lock handles this branch normally)
+        yaw -= e.movementX * 0.005
+        if (Math.abs(e.movementX) > 2 || Math.abs(e.movementY) > 2) _dragMoved = true
+      }
     }
   })
-  domElement.addEventListener('mousedown', () => { _dragging = true;  _dragMoved = false })
-  document.addEventListener('mouseup',     () => { _dragging = false })
+  domElement.addEventListener('mousedown', () => {
+    _dragging = true; _dragMoved = false
+    if (mode === 'overview') domElement.style.cursor = 'grabbing'
+  })
+  document.addEventListener('mouseup', () => {
+    _dragging = false
+    if (mode === 'overview') domElement.style.cursor = 'grab'
+    // flat mode canvas manages its own cursor — nothing to do here
+  })
+
+  // ── Overview scroll-to-zoom ───────────────────────────────────────────────
+  domElement.addEventListener('wheel', e => {
+    if (mode !== 'overview') return
+    e.preventDefault()
+    // Normalise across mouse wheels (line mode ~120 per notch) and trackpads
+    // (pixel mode, can be 1-500). Use a multiplicative factor so each notch
+    // feels the same regardless of input device. ~8% per wheel notch.
+    const raw    = e.deltaMode === 0 ? e.deltaY : e.deltaY * 24
+    const factor = Math.pow(0.997, raw)
+    _ovZoom = Math.max(14, Math.min(60, _ovZoom * factor))
+  }, { passive: false })
 
   // ── Navigate to world-space destination ──────────────────────────────────
   function navigate (dest) {
     navPath   = buildPath({ x: avatar.position.x, z: avatar.position.z }, dest)
     navIdx    = 0
     autoMoving = true
+    _ovPanned  = false   // re-follow avatar while it walks to destination
     if (mode === 'overview') _showOverviewMarker(dest)
   }
 
@@ -80,6 +130,10 @@ export function setupControls (avatar, camera, domElement) {
     const marker  = document.getElementById('overview-marker')
     if (marker && mode !== 'overview') marker.style.display = 'none'
     if (mode === 'third' || mode === 'overview') document.exitPointerLock?.()
+    // Show grab cursor in overview; flat mode manages its own canvas cursor
+    domElement.style.cursor = mode === 'overview' ? 'grab' : 'pointer'
+    // Flat mode covers the 3-D canvas — hide it so it doesn't bleed through
+    domElement.style.visibility = mode === 'flat' ? 'hidden' : 'visible'
     // Sync the toggle pill buttons
     document.querySelectorAll('.vtbtn').forEach(btn =>
       btn.classList.toggle('active', btn.dataset.view === mode)
@@ -99,12 +153,75 @@ export function setupControls (avatar, camera, domElement) {
     _prev.copy(avatar.position)
     let isMoving = false
 
-    if (mode === 'overview') {
-      // ── 2D top-down map ──────────────────────────────────────────────────
-      _camT.set(avatar.position.x, 38, avatar.position.z + 1)
-      const snap = camera.position.distanceTo(_camT) > 22 ? 0.18 : 0.06
-      camera.position.lerp(_camT, snap)
+    if (mode === 'flat') {
+      // ── 2-D Gather-style flat map ────────────────────────────────────────
+      // WASD / arrows move along fixed world axes (up = -Z, like Gather.town).
+      // navPath click-to-move also works. Collision is fully active.
+      // The 3-D canvas is covered by the flat canvas overlay.
+      _move.set(0, 0, 0)
+      if (keys['KeyW']     || keys['ArrowUp'])    _move.z -= 1
+      if (keys['KeyS']     || keys['ArrowDown'])  _move.z += 1
+      if (keys['KeyA']     || keys['ArrowLeft'])  _move.x -= 1
+      if (keys['KeyD']     || keys['ArrowRight']) _move.x += 1
+
+      const anyKeyF = keys['KeyW']||keys['KeyS']||keys['KeyA']||keys['KeyD']||
+                      keys['ArrowUp']||keys['ArrowDown']||keys['ArrowLeft']||keys['ArrowRight']
+      if (anyKeyF && autoMoving) { autoMoving = false; navPath = [] }
+
+      if (autoMoving && navPath.length > 0 && _move.lengthSq() === 0) {
+        const wp   = navPath[navIdx]
+        const dx   = wp.x - avatar.position.x
+        const dz   = wp.z - avatar.position.z
+        const dist = Math.sqrt(dx * dx + dz * dz)
+        if (dist < 0.25) {
+          if (++navIdx >= navPath.length) { autoMoving = false; navPath = [] }
+        } else {
+          _move.set(dx / dist, 0, dz / dist)
+        }
+      }
+
+      if (_move.lengthSq() > 0) {
+        _move.normalize()
+        avatar.position.x += _move.x * WALK_SPEED * delta
+        avatar.position.z += _move.z * WALK_SPEED * delta
+        const tYaw = Math.atan2(_move.x, _move.z)
+        let diff = tYaw - avatar.rotation.y
+        while (diff >  Math.PI) diff -= Math.PI * 2
+        while (diff < -Math.PI) diff += Math.PI * 2
+        avatar.rotation.y += diff * Math.min(1, 20 * delta)
+        isMoving = true
+      }
+      const rflat = resolveCollision(_prev, avatar.position)
+      avatar.position.set(rflat.x, 0, rflat.z)
+
+      // Park 3-D camera out of view (flat canvas covers the renderer)
+      camera.position.set(avatar.position.x, 60, avatar.position.z)
       camera.lookAt(avatar.position.x, 0, avatar.position.z)
+
+    } else if (mode === 'overview') {
+      // ── 2D top-down map ──────────────────────────────────────────────────
+      // When avatar is moving (autoMoving) re-centre camera on it;
+      // when user is panning manually leave the camera where they dragged it
+      if (autoMoving) {
+        // Follow avatar while click-navigating — delta-corrected so feel is
+        // the same at 30 fps and 144 fps (lambda=8 → ~half-life of ~87ms)
+        const f = 1 - Math.exp(-8 * delta)
+        _ovCamX += (avatar.position.x - _ovCamX) * f
+        _ovCamZ += (avatar.position.z - _ovCamZ) * f
+        _ovPanned = false
+      } else if (!_ovPanned) {
+        // Idle: lazily stay on avatar (lambda=5 → soft follow)
+        const f = 1 - Math.exp(-5 * delta)
+        _ovCamX += (avatar.position.x - _ovCamX) * f
+        _ovCamZ += (avatar.position.z - _ovCamZ) * f
+      }
+
+      _camT.set(_ovCamX, _ovZoom, _ovCamZ + 1)
+      // Fast snap when camera is far away (first switch to overview),
+      // gentle follow once settled — both delta-corrected
+      const snapLambda = camera.position.distanceTo(_camT) > 22 ? 20 : 8
+      camera.position.lerp(_camT, 1 - Math.exp(-snapLambda * delta))
+      camera.lookAt(_ovCamX, 0, _ovCamZ)
 
       if (autoMoving && navPath.length > 0) {
         const wp   = navPath[navIdx]
@@ -123,29 +240,44 @@ export function setupControls (avatar, camera, domElement) {
 
     } else if (mode === 'third') {
       // ── 3rd-person follow camera ─────────────────────────────────────────
-      isMoving = _applyMovement(delta)
+      const mv = _applyMovement(delta)
+      isMoving = mv.isMoving
       const resolved = resolveCollision(_prev, avatar.position)
       avatar.position.set(resolved.x, 0, resolved.z)
 
-      if (document.pointerLockElement !== domElement && autoMoving && isMoving) {
-        // Auto-swing camera behind moving avatar
+      // Swing camera behind avatar whenever moving & user isn't actively dragging
+      // (matches GTA V / Fortnite TPP standard: camera follows locomotion,
+      //  but respects manual orbit while the mouse button is held)
+      if (isMoving && !_dragging) {
         let d = avatar.rotation.y - yaw
         while (d >  Math.PI) d -= Math.PI * 2
         while (d < -Math.PI) d += Math.PI * 2
-        yaw += d * 4 * delta
+        // Slightly faster swing for key movement so camera feels responsive
+        const swingRate = mv.fromKeys ? 5 : 3
+        yaw += d * swingRate * delta
       }
 
+      // Spring arm: shorten when a wall sits between avatar and ideal camera position.
+      // This prevents the "see through wall" effect — camera pulls in instead of clipping.
+      const arm    = _springArm(avatar.position.x, avatar.position.z, yaw, CAM_DIST)
+      const pivotY = avatar.position.y + 1.2
       _camT.set(
-        avatar.position.x - Math.sin(yaw) * CAM_DIST,
-        avatar.position.y + CAM_HEIGHT,
-        avatar.position.z - Math.cos(yaw) * CAM_DIST
+        avatar.position.x - Math.sin(yaw) * Math.cos(camPitch) * arm,
+        pivotY            + Math.sin(camPitch) * arm,
+        avatar.position.z - Math.cos(yaw) * Math.cos(camPitch) * arm
       )
-      camera.position.lerp(_camT, CAM_LERP)
-      camera.lookAt(avatar.position.x, avatar.position.y + 1.2, avatar.position.z)
+      // Snap immediately when arm is shortened by collision (no lerp through wall),
+      // smooth lerp otherwise so normal movement feels fluid
+      if (arm < CAM_DIST * 0.92) {
+        camera.position.copy(_camT)
+      } else {
+        camera.position.lerp(_camT, 1 - Math.exp(-CAM_LAG * delta))
+      }
+      camera.lookAt(avatar.position.x, pivotY, avatar.position.z)
 
     } else {
       // ── 1st-person (FPS) ──────────────────────────────────────────────────
-      isMoving = _applyMovement(delta)
+      isMoving = _applyMovement(delta).isMoving
       const resolved = resolveCollision(_prev, avatar.position)
       avatar.position.set(resolved.x, 0, resolved.z)
 
@@ -158,6 +290,7 @@ export function setupControls (avatar, camera, domElement) {
   }
 
   // ── Shared WASD + nav-path movement ───────────────────────────────────────
+  // Returns { isMoving: bool, fromKeys: bool }
   function _applyMovement (delta) {
     camera.getWorldDirection(_camFwd)
     _camFwd.y = 0; _camFwd.normalize()
@@ -168,6 +301,11 @@ export function setupControls (avatar, camera, domElement) {
     if (keys['KeyS']     || keys['ArrowDown'])  _move.addScaledVector(_camFwd,   -1)
     if (keys['KeyA']     || keys['ArrowLeft'])  _move.addScaledVector(_camRight, -1)
     if (keys['KeyD']     || keys['ArrowRight']) _move.addScaledVector(_camRight,  1)
+
+    const anyKey = keys['KeyW']||keys['KeyS']||keys['KeyA']||keys['KeyD']||
+                   keys['ArrowUp']||keys['ArrowDown']||keys['ArrowLeft']||keys['ArrowRight']
+    const fromKeys = anyKey
+    if (anyKey && autoMoving) { autoMoving = false; navPath = [] }
 
     // Nav-path movement when no key held
     if (autoMoving && navPath.length > 0 && _move.lengthSq() === 0) {
@@ -182,23 +320,50 @@ export function setupControls (avatar, camera, domElement) {
       }
     }
 
-    const anyKey = keys['KeyW']||keys['KeyS']||keys['KeyA']||keys['KeyD']||
-                   keys['ArrowUp']||keys['ArrowDown']||keys['ArrowLeft']||keys['ArrowRight']
-    if (anyKey && autoMoving) { autoMoving = false; navPath = [] }
-
     if (_move.lengthSq() > 0) {
       _move.normalize()
       avatar.position.x += _move.x * WALK_SPEED * delta
       avatar.position.z += _move.z * WALK_SPEED * delta
-      // Smooth avatar face direction
+      // Near-instant avatar facing (industry standard: GTA V, Fortnite TPP, Roblox)
+      // delta-corrected so it feels the same at any frame rate; clamp to 1 so
+      // we never overshoot — at 60fps this completes a full 180° in ~3 frames
       const tYaw = Math.atan2(_move.x, _move.z)
       let diff = tYaw - avatar.rotation.y
       while (diff >  Math.PI) diff -= Math.PI * 2
       while (diff < -Math.PI) diff += Math.PI * 2
-      avatar.rotation.y += diff * 0.18
-      return true
+      avatar.rotation.y += diff * Math.min(1, 20 * delta)
+      return { isMoving: true, fromKeys }
     }
-    return false
+    return { isMoving: false, fromKeys }
+  }
+
+  // ── Spring arm: returns safe camera distance avoiding wall clipping ────────
+  // Casts a horizontal ray from avatar centre backward along the camera yaw
+  // direction. Walls are vertical slabs, so XZ-plane intersection is enough.
+  // Industry reference: Unreal Engine Spring Arm Component (CameraLagSpeed),
+  // also used by GTA V, Dark Souls, Roblox — camera pulls in on wall contact
+  // and eases back out when clear.
+  function _springArm (fromX, fromZ, yawAngle, maxArm) {
+    const dirX = -Math.sin(yawAngle)
+    const dirZ = -Math.cos(yawAngle)
+    let safe = maxArm
+    for (const wall of STATIC_WALLS) {
+      const t = _rayAABB(fromX, fromZ, dirX, dirZ, wall)
+      if (t > 0.3 && t < safe) safe = t - 0.25   // pull in 25cm before wall face
+    }
+    return Math.max(0.8, safe)
+  }
+
+  // Slab-method ray vs AABB intersection in XZ. Returns distance t or Infinity.
+  function _rayAABB (ox, oz, dx, dz, box) {
+    const invX = dx === 0 ? 1e10 : 1 / dx
+    const invZ = dz === 0 ? 1e10 : 1 / dz
+    const tx1  = (box.minX - ox) * invX,  tx2 = (box.maxX - ox) * invX
+    const tz1  = (box.minZ - oz) * invZ,  tz2 = (box.maxZ - oz) * invZ
+    const tmin = Math.max(Math.min(tx1, tx2), Math.min(tz1, tz2))
+    const tmax = Math.min(Math.max(tx1, tx2), Math.max(tz1, tz2))
+    if (tmax < 0.001 || tmin > tmax) return Infinity
+    return tmin > 0.001 ? tmin : Infinity
   }
 
   // Initialise DOM to match starting mode

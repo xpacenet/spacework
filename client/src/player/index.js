@@ -4,6 +4,7 @@ import { createLocalAvatar, animateWalk }  from './avatar.js'
 import { getZone, setFurnitureColliders } from './collision.js'
 import { BLDG as B }                       from '../scene/building.js'
 import { buildFurniture }                  from '../scene/furniture.js'
+import { FlatMap }                         from '../ui/flatMap.js'
 
 // ── Zone visual config ────────────────────────────────────────────────────
 const ZONES = [
@@ -39,6 +40,9 @@ export function initPlayer (scene, camera, renderer, onZoneChange) {
   let currentZone = ''
   let _lastMode   = controls.getMode()
 
+  // ── Flat 2-D map ───────────────────────────────────────────────────────────
+  const flatMap = new FlatMap((dest) => controls.navigate(dest))
+
   // Collect meshes to show/hide based on 2D↔3D mode
   const _mapHide = []   // hidden in 2D overview (ceiling, roof, etc.)
   const _mapShow = []   // shown  in 2D overview only (room labels)
@@ -46,15 +50,18 @@ export function initPlayer (scene, camera, renderer, onZoneChange) {
     if (o.userData.mapHide) _mapHide.push(o)
     if (o.userData.mapShow) _mapShow.push(o)
   })
-  // Apply initial state (starts in overview)
+  // Apply initial state (starts in flat mode — 3D elements hidden, flat canvas shown)
   _mapHide.forEach(o => { o.visible = false })
-  _mapShow.forEach(o => { o.visible = true  })
+  _mapShow.forEach(o => { o.visible = false })
+  flatMap.show()
 
   function applyModeVisibility (m) {
-    _mapHide.forEach(o => { o.visible = m !== 'overview' })
-    _mapShow.forEach(o => { o.visible = m === 'overview'  })
-    // Hide avatar body in first person so it doesn't block the view
+    _mapHide.forEach(o => { o.visible = m !== 'overview' && m !== 'flat' })
+    _mapShow.forEach(o => { o.visible = m === 'overview' })
+    // Hide avatar body in first-person so it doesn't block the view
     avatar.visible = m !== 'first'
+    // Show / hide flat canvas
+    if (m === 'flat') flatMap.show(); else flatMap.hide()
   }
 
   initMapClick(controls, avatar)
@@ -71,10 +78,12 @@ export function initPlayer (scene, camera, renderer, onZoneChange) {
     const badge = document.getElementById('mode-badge')
     if (!badge) return
     const m = controls.getMode()
-    badge.textContent   = m === 'overview' ? '🗺 2D MAP' : m === 'first' ? '👁 1ST PERSON' : '👤 3RD PERSON'
-    badge.style.background   = m === 'overview' ? 'rgba(255,160,0,0.2)' : 'rgba(0,100,255,0.2)'
-    badge.style.borderColor  = m === 'overview' ? 'rgba(255,160,0,0.4)' : 'rgba(0,150,255,0.4)'
-    badge.style.color        = m === 'overview' ? '#ffaa00' : '#4af'
+    const labels = { flat: '🎮 FLAT MAP', overview: '🗺 3D MAP', third: '👤 3RD PERSON', first: '👁 1ST PERSON' }
+    badge.textContent  = labels[m] ?? m
+    const is2d = m === 'flat' || m === 'overview'
+    badge.style.background  = is2d ? 'rgba(255,160,0,0.2)' : 'rgba(0,100,255,0.2)'
+    badge.style.borderColor = is2d ? 'rgba(255,160,0,0.4)' : 'rgba(0,150,255,0.4)'
+    badge.style.color       = is2d ? '#ffaa00' : '#4af'
   }
 
   function tick () {
@@ -88,6 +97,8 @@ export function initPlayer (scene, camera, renderer, onZoneChange) {
     const m = controls.getMode()
     if (m !== _lastMode) { _lastMode = m; applyModeVisibility(m) }
     drawMinimap(avatar.position, m)
+    // Update flat map every frame when visible
+    if (m === 'flat') flatMap.update(avatar.position)
   }
   tick()
 
@@ -96,7 +107,12 @@ export function initPlayer (scene, camera, renderer, onZoneChange) {
     getRotation:  () => avatar.rotation.clone(),
     navigate:     (dest) => controls.navigate(dest),
     isDragMoved:  () => controls.isDragMoved(),
+    getMode:      () => controls.getMode(),
     setView:      (m)    => { controls.setMode(m); applyModeVisibility(m) },
+    // Peer avatar tracking for the flat map
+    peerJoin:  (id, name)       => flatMap.setPeer(id, 0, 0, name),
+    peerMove:  (id, x, z, name) => flatMap.setPeer(id, x, z, name),
+    peerLeave: (id)             => flatMap.removePeer(id),
   }
 }
 

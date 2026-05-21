@@ -146,13 +146,16 @@ function startBoarding() {
     // Clicking the overlay just dismisses it; WASD grants lock on first press
     clickToStart.addEventListener('click', dismissStartOverlay)
     // Arrow keys just move — they never steal the cursor.
-    // Only WASD deliberately enters FPS (pointer-lock) mode.
+    // WASD only enters pointer-lock in 1st-person mode; in 3rd-person
+    // the camera is controlled by mouse drag so no lock is needed.
     const FPS_KEYS = new Set(['KeyW','KeyA','KeyS','KeyD'])
     const ALL_MOV  = new Set([...FPS_KEYS,'ArrowUp','ArrowDown','ArrowLeft','ArrowRight'])
     document.addEventListener('keydown', e => {
       if (!ALL_MOV.has(e.code)) return
       dismissStartOverlay()
-      if (FPS_KEYS.has(e.code) && document.pointerLockElement !== renderer.domElement) {
+      if (FPS_KEYS.has(e.code) &&
+          player.getMode() === 'first' &&
+          document.pointerLockElement !== renderer.domElement) {
         renderer.domElement.requestPointerLock()
       }
     })
@@ -191,22 +194,28 @@ function startBoarding() {
     // Trystero WebRTC (remote, seconds). Both fire the same events here.
     const _avatars = new Map()   // peerId → THREE.Group
 
+    const _peerUsernames = new Map()   // peerId → username
+
     spaceSync.addEventListener('peer:join', e => {
       const { peerId, username: peerName } = e.detail
+      _peerUsernames.set(peerId, peerName)
       if (_avatars.has(peerId)) return
       const av = _makeAvatar(peerName)
       scene.add(av)
       _avatars.set(peerId, av)
       _updateOnlineCount(hud, _avatars.size + 1)
+      player.peerJoin(peerId, peerName)
     })
 
     spaceSync.addEventListener('peer:move', e => {
       const { peerId, pos } = e.detail
       const av = _avatars.get(peerId)
-      if (!av) return
-      // Lerp at 0.6 — fast enough to feel real-time at 50ms broadcast interval
-      av.position.lerp(new THREE.Vector3(pos.x, pos.y, pos.z), 0.6)
-      if (pos.ry !== undefined) av.rotation.y = pos.ry
+      if (av) {
+        // Lerp at 0.6 — fast enough to feel real-time at 50ms broadcast interval
+        av.position.lerp(new THREE.Vector3(pos.x, pos.y, pos.z), 0.6)
+        if (pos.ry !== undefined) av.rotation.y = pos.ry
+      }
+      player.peerMove(peerId, pos.x, pos.z, _peerUsernames.get(peerId) ?? peerId.slice(-4))
     })
 
     spaceSync.addEventListener('peer:leave', e => {
@@ -216,6 +225,8 @@ function startBoarding() {
         _avatars.delete(e.detail.peerId)
         _updateOnlineCount(hud, _avatars.size + 1)
       }
+      player.peerLeave(e.detail.peerId)
+      _peerUsernames.delete(e.detail.peerId)
     })
 
     // Start sync only after listeners are ready — peers detected before this would fire into void

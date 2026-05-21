@@ -71,13 +71,16 @@ export function animateWalk(avatar, moving, delta) {
   const { legL, legR } = avatar.userData
   if (!legL || !legR) return
   if (moving) {
-    avatar.userData.walkClock += delta * 6
-    const swing = Math.sin(avatar.userData.walkClock) * 0.4
+    // 12 rad/s ≈ 1.9 Hz — matches a brisk walk at WALK_SPEED 5.5 m/s
+    avatar.userData.walkClock += delta * 12
+    const swing = Math.sin(avatar.userData.walkClock) * 0.42
     legL.rotation.x =  swing
     legR.rotation.x = -swing
   } else {
-    // Return to neutral
-    legL.rotation.x *= 0.8
-    legR.rotation.x *= 0.8
+    // Return to neutral — delta-corrected exponential decay so snap-back
+    // speed is identical at 30 fps and 144 fps (half-life ≈ 55 ms)
+    const decay = Math.exp(-12 * delta)
+    legL.rotation.x *= decay
+    legR.rotation.x *= decay
   }
 }
