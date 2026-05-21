@@ -2,7 +2,9 @@ import * as THREE from 'three'
 import { resolveCollision, buildPath, STATIC_WALLS } from './collision.js'
 
 const WALK_SPEED = 5.5
-const CAM_DIST   = 5.0   // 3rd-person follow distance
+const CAM_DIST_DEFAULT = 5.0   // 3rd-person default follow distance
+const CAM_DIST_MIN     = 2.0
+const CAM_DIST_MAX     = 12.0
 const CAM_HEIGHT = 2.6
 // CAM_LERP is computed per-frame as 1 - exp(-CAM_LAG * delta) so the
 // camera feel is identical at 30 fps, 60 fps, and 144 fps.
@@ -21,6 +23,7 @@ export function setupControls (avatar, camera, domElement) {
   let _dragMoved = false
   let camPitch   = 0.28   // 3rd-person vertical arm angle (rad). 0 = level, π/2 = top-down
                            // default ~16° gives a comfortable over-the-shoulder view
+  let camDist    = CAM_DIST_DEFAULT  // 3rd-person arm length, adjusted by scroll wheel
 
   // ── Overview free-camera pan / zoom ───────────────────────────────────────
   let _ovCamX    = 0      // world-space look-at position for overview
@@ -91,16 +94,20 @@ export function setupControls (avatar, camera, domElement) {
     // flat mode canvas manages its own cursor — nothing to do here
   })
 
-  // ── Overview scroll-to-zoom ───────────────────────────────────────────────
+  // ── Scroll-to-zoom (overview: camera height / 3rd-person: arm length) ────
   domElement.addEventListener('wheel', e => {
-    if (mode !== 'overview') return
+    if (mode !== 'overview' && mode !== 'third') return
     e.preventDefault()
-    // Normalise across mouse wheels (line mode ~120 per notch) and trackpads
-    // (pixel mode, can be 1-500). Use a multiplicative factor so each notch
-    // feels the same regardless of input device. ~8% per wheel notch.
+    // Normalise across mouse wheels (line mode) and trackpads (pixel mode).
+    // Multiplicative factor = same % change per notch regardless of device.
     const raw    = e.deltaMode === 0 ? e.deltaY : e.deltaY * 24
     const factor = Math.pow(0.997, raw)
-    _ovZoom = Math.max(14, Math.min(60, _ovZoom * factor))
+    if (mode === 'overview') {
+      _ovZoom = Math.max(14, Math.min(60, _ovZoom * factor))
+    } else {
+      // 3rd-person: scroll in/out zooms camera distance (like GTA V / Roblox)
+      camDist = Math.max(CAM_DIST_MIN, Math.min(CAM_DIST_MAX, camDist * factor))
+    }
   }, { passive: false })
 
   // ── Navigate to world-space destination ──────────────────────────────────
@@ -259,7 +266,7 @@ export function setupControls (avatar, camera, domElement) {
 
       // Spring arm: shorten when a wall sits between avatar and ideal camera position.
       // This prevents the "see through wall" effect — camera pulls in instead of clipping.
-      const arm    = _springArm(avatar.position.x, avatar.position.z, yaw, CAM_DIST)
+      const arm    = _springArm(avatar.position.x, avatar.position.z, yaw, camDist)
       const pivotY = avatar.position.y + 1.2
       _camT.set(
         avatar.position.x - Math.sin(yaw) * Math.cos(camPitch) * arm,
@@ -268,7 +275,7 @@ export function setupControls (avatar, camera, domElement) {
       )
       // Snap immediately when arm is shortened by collision (no lerp through wall),
       // smooth lerp otherwise so normal movement feels fluid
-      if (arm < CAM_DIST * 0.92) {
+      if (arm < camDist * 0.92) {
         camera.position.copy(_camT)
       } else {
         camera.position.lerp(_camT, 1 - Math.exp(-CAM_LAG * delta))

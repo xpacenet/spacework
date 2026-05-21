@@ -53,15 +53,26 @@ export function initPlayer (scene, camera, renderer, onZoneChange) {
   // Apply initial state (starts in flat mode — 3D elements hidden, flat canvas shown)
   _mapHide.forEach(o => { o.visible = false })
   _mapShow.forEach(o => { o.visible = false })
+  flatMap.centreOn(avatar.position.x, avatar.position.z)
   flatMap.show()
+  const _minimapEl = document.getElementById('minimap')
+  if (_minimapEl) _minimapEl.style.display = 'none'
 
   function applyModeVisibility (m) {
     _mapHide.forEach(o => { o.visible = m !== 'overview' && m !== 'flat' })
     _mapShow.forEach(o => { o.visible = m === 'overview' })
     // Hide avatar body in first-person so it doesn't block the view
     avatar.visible = m !== 'first'
-    // Show / hide flat canvas
-    if (m === 'flat') flatMap.show(); else flatMap.hide()
+    // Show / hide flat canvas; re-centre on player when entering flat mode
+    if (m === 'flat') {
+      flatMap.centreOn(avatar.position.x, avatar.position.z)
+      flatMap.show()
+    } else {
+      flatMap.hide()
+    }
+    // Hide the corner minimap in flat mode — the whole screen is already a map
+    const minimap = document.getElementById('minimap')
+    if (minimap) minimap.style.display = m === 'flat' ? 'none' : ''
   }
 
   initMapClick(controls, avatar)

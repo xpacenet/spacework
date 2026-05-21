@@ -28,9 +28,9 @@ export function createLocalAvatar(username) {
   // Hair
   add(new THREE.SphereGeometry(0.185, 14, 8, 0, Math.PI * 2, 0, 1.1), hair, 0, 1.65, 0)
 
-  // Arms
-  add(new THREE.CapsuleGeometry(0.065, 0.32, 4, 8), suit, -0.31, 1.10, 0)
-  add(new THREE.CapsuleGeometry(0.065, 0.32, 4, 8), suit,  0.31, 1.10, 0)
+  // Arms — stored for walk animation counterswing
+  const armL = add(new THREE.CapsuleGeometry(0.065, 0.32, 4, 8), suit, -0.31, 1.10, 0)
+  const armR = add(new THREE.CapsuleGeometry(0.065, 0.32, 4, 8), suit,  0.31, 1.10, 0)
   // Hands
   add(new THREE.SphereGeometry(0.075, 10, 8), skin, -0.32, 0.72, 0)
   add(new THREE.SphereGeometry(0.075, 10, 8), skin,  0.32, 0.72, 0)
@@ -60,15 +60,17 @@ export function createLocalAvatar(username) {
   group.add(sprite)
 
   // Walk animation refs
-  group.userData.legL = legL
-  group.userData.legR = legR
+  group.userData.legL      = legL
+  group.userData.legR      = legR
+  group.userData.armL      = armL
+  group.userData.armR      = armR
   group.userData.walkClock = 0
 
   return group
 }
 
 export function animateWalk(avatar, moving, delta) {
-  const { legL, legR } = avatar.userData
+  const { legL, legR, armL, armR } = avatar.userData
   if (!legL || !legR) return
   if (moving) {
     // 12 rad/s ≈ 1.9 Hz — matches a brisk walk at WALK_SPEED 5.5 m/s
@@ -76,11 +78,16 @@ export function animateWalk(avatar, moving, delta) {
     const swing = Math.sin(avatar.userData.walkClock) * 0.42
     legL.rotation.x =  swing
     legR.rotation.x = -swing
+    // Arms counterswing (opposite phase to legs = natural human gait)
+    if (armL) armL.rotation.x = -swing * 0.55
+    if (armR) armR.rotation.x =  swing * 0.55
   } else {
-    // Return to neutral — delta-corrected exponential decay so snap-back
-    // speed is identical at 30 fps and 144 fps (half-life ≈ 55 ms)
+    // Return to neutral — delta-corrected exponential decay
+    // identical feel at 30 fps and 144 fps (half-life ≈ 55 ms)
     const decay = Math.exp(-12 * delta)
     legL.rotation.x *= decay
     legR.rotation.x *= decay
+    if (armL) armL.rotation.x *= decay
+    if (armR) armR.rotation.x *= decay
   }
 }

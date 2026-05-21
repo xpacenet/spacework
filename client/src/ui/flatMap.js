@@ -76,6 +76,9 @@ export class FlatMap {
     this._dragMoved = false
     this._lx = 0; this._ly = 0
 
+    // Click-destination ping (persists 600ms then fades)
+    this._ping = null   // { cx, cy, born } — canvas coords + timestamp
+
     this._setupMouse()
     this._setupTouch()
     this._resize()
@@ -101,6 +104,7 @@ export class FlatMap {
     this._drawDoors(ctx)
     this._drawPeers(ctx)
     this._drawPlayer(ctx, playerPos)
+    this._drawNavPing(ctx)
     this._drawHints(ctx, W, H)
   }
 
@@ -108,7 +112,14 @@ export class FlatMap {
   _fire (canvasX, canvasY) {
     const [wx, wz] = this._c2w(canvasX, canvasY)
     this._nav({ x: wx, z: wz })
-    this._drawPing(canvasX, canvasY)
+    // Store ping so it renders for 600 ms with a fade-out
+    this._ping = { cx: canvasX, cy: canvasY, born: performance.now() }
+  }
+
+  // Called by player/index.js when switching TO flat mode — re-centres view
+  centreOn (worldX, worldZ) {
+    this._panX = worldX
+    this._panZ = worldZ
   }
 
   // ── Coordinate helpers ──────────────────────────────────────────────────────
@@ -370,12 +381,32 @@ export class FlatMap {
     ctx.shadowBlur = 0
   }
 
-  _drawPing (cx, cy) {
-    // Draw a temporary click-target ring
-    const ctx = this._ctx
-    ctx.strokeStyle = 'rgba(255,255,255,0.8)'
-    ctx.lineWidth = 2
-    ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.stroke()
+  _drawNavPing (ctx) {
+    if (!this._ping) return
+    const age    = performance.now() - this._ping.born
+    const dur    = 600   // ms the ping lasts
+    if (age > dur) { this._ping = null; return }
+
+    const t      = age / dur               // 0 → 1
+    const alpha  = 1 - t                   // fades out
+    const radius = 8 + t * 18             // expands outward
+
+    // Destination cross
+    const { cx, cy } = this._ping
+    ctx.globalAlpha = alpha
+    ctx.strokeStyle = '#ffffff'
+    ctx.lineWidth   = 2
+    const cs = 6
+    ctx.beginPath()
+    ctx.moveTo(cx - cs, cy); ctx.lineTo(cx + cs, cy)
+    ctx.moveTo(cx, cy - cs); ctx.lineTo(cx, cy + cs)
+    ctx.stroke()
+
+    // Expanding ring
+    ctx.strokeStyle = '#00ffff'
+    ctx.lineWidth   = 1.5
+    ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.stroke()
+    ctx.globalAlpha = 1
   }
 
   _drawHints (ctx, W, H) {
