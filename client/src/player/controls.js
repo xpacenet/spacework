@@ -68,13 +68,13 @@ export function setupControls (avatar, camera, domElement) {
     }
     if (_dragging) {
       if (mode === 'overview') {
-        // Pan the bird's-eye camera independently of the avatar
-        // Scale converts pixels → world units based on current zoom height + FOV
-        // 0.9 coefficient slows pan to feel deliberate (not racing across world)
+        // Pan: subtract movement so the scene follows the cursor (grab-and-drag,
+        // like Google Maps). += would push the scene away from the cursor.
+        // Scale: world-units-per-pixel based on current height and FOV.
+        // 0.9 coefficient keeps panning deliberate — never exceed (per CLAUDE.md).
         const scale = (_ovZoom * 1.534 * 0.9) / window.innerHeight
-        _ovCamX += e.movementX * scale
-        _ovCamZ -= e.movementY * scale
-        // Clamp so you can't pan to infinity
+        _ovCamX -= e.movementX * scale   // was +=  (inverted — scene ran away)
+        _ovCamZ += e.movementY * scale   // was -=  (also inverted)
         _ovCamX = Math.max(-60, Math.min(60, _ovCamX))
         _ovCamZ = Math.max(-60, Math.min(60, _ovCamZ))
         _ovPanned = true
@@ -115,7 +115,25 @@ export function setupControls (avatar, camera, domElement) {
     const raw    = e.deltaMode === 0 ? e.deltaY : e.deltaY * 24
     const factor = Math.pow(0.997, raw)
     if (mode === 'overview') {
+      // Cursor-centred zoom: keep the world point under the cursor fixed.
+      // 1. Compute how much the zoom level changes (dZoom).
+      // 2. Convert cursor NDC position to a fractional screen offset
+      //    (scx ∈ [-0.5, +0.5], scy ∈ [-0.5, +0.5]).
+      // 3. Shift the look-at point so the world under the cursor doesn't move.
+      //    Formula derived from the perspective projection at height h:
+      //    worldOffset = screenFraction × height × 2 × tan(fov/2)
+      const oldZoom = _ovZoom
       _ovZoom = Math.max(14, Math.min(60, _ovZoom * factor))
+      const dZoom = _ovZoom - oldZoom
+      const tanHalfFov = Math.tan((camera.fov * Math.PI / 180) / 2)
+      const aspect = window.innerWidth / window.innerHeight
+      const scx =  (e.clientX / window.innerWidth  - 0.5)
+      const scy = -(e.clientY / window.innerHeight - 0.5)
+      _ovCamX -= scx * dZoom * 2 * tanHalfFov * aspect
+      _ovCamZ += scy * dZoom * 2 * tanHalfFov
+      _ovCamX = Math.max(-60, Math.min(60, _ovCamX))
+      _ovCamZ = Math.max(-60, Math.min(60, _ovCamZ))
+      _ovPanned = true
     } else {
       // 3rd-person: scroll in/out zooms camera distance (like GTA V / Roblox)
       camDist = Math.max(CAM_DIST_MIN, Math.min(CAM_DIST_MAX, camDist * factor))
