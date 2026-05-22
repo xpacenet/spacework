@@ -26,7 +26,7 @@ const MAP = {
 
 let mapCanvas, mapCtx
 
-export function initPlayer (scene, camera, renderer, onZoneChange) {
+export function initPlayer (scene, camera, renderer, onZoneChange, onAvatarChange) {
   const username   = window._spaceUsername || 'You'
   const savedPreset = parseInt(localStorage.getItem('spaceAvatarId') ?? '0', 10)
   const avatar     = createLocalAvatar(username, savedPreset)
@@ -34,7 +34,10 @@ export function initPlayer (scene, camera, renderer, onZoneChange) {
   scene.add(avatar)
 
   // ── Avatar picker ─────────────────────────────────────────────────────────
-  const picker = new AvatarPicker((id) => applyPreset(avatar, username, id))
+  const picker = new AvatarPicker((id) => {
+    applyPreset(avatar, username, id)
+    onAvatarChange?.(id)   // notify main.js → broadcast to all peers
+  })
   const avatarBtn = document.getElementById('avatar-btn')
   if (avatarBtn) avatarBtn.addEventListener('click', () => picker.show())
 

@@ -154,7 +154,9 @@ function startBoarding() {
     const { openScreen, isOpen }            = initScreenOverlay()
 
     // ── Player ────────────────────────────────────────────────────────────
-    const player = initPlayer(scene, camera, renderer, updateZoneUI)
+    const player = initPlayer(scene, camera, renderer, updateZoneUI,
+      (presetId) => spaceSync.setAvatar(presetId)
+    )
 
     // ── View toggle pill (2D / 3rd / 1st) ────────────────────────────────
     document.querySelectorAll('.vtbtn').forEach(btn => {
@@ -235,12 +237,11 @@ function startBoarding() {
     const _peerUsernames = new Map()   // peerId → username
 
     spaceSync.addEventListener('peer:join', e => {
-      const { peerId, username: peerName } = e.detail
+      const { peerId, username: peerName, presetId: peerPreset } = e.detail
       _peerUsernames.set(peerId, peerName)
       if (_avatars.has(peerId)) return
-      // Assign a deterministic preset from the peer ID so the same peer always
-      // gets the same avatar colour across sessions (upgradeable to user-chosen later)
-      const av = createLocalAvatar(peerName, _presetFromId(peerId))
+      // Use the peer's actual chosen preset; fall back to hash-based if not yet known
+      const av = createLocalAvatar(peerName, peerPreset ?? _presetFromId(peerId))
       scene.add(av)
       _avatars.set(peerId, av)
       _updateOnlineCount(hud, _avatars.size + 1)
@@ -283,6 +284,14 @@ function startBoarding() {
       _peerUsernames.delete(e.detail.peerId)
     })
 
+    // Avatar change broadcast from a remote peer
+    spaceSync.addEventListener('peer:avatar', e => {
+      const { peerId, presetId } = e.detail
+      const av   = _avatars.get(peerId)
+      const name = _peerUsernames.get(peerId) ?? peerId.slice(-4)
+      if (av) applyPreset(av, name, presetId)
+    })
+
     // ── Peer avatar animation loop ─────────────────────────────────────────
     // Runs independently of the player tick so peer walk animation stays
     // smooth even when the local player is idle.
@@ -295,8 +304,9 @@ function startBoarding() {
       _avatars.forEach(av => animateWalk(av, av.userData.isMoving ?? false, delta))
     })()
 
-    // Start sync only after listeners are ready — peers detected before this would fire into void
-    spaceSync.start(username)
+    // Start sync — include saved preset so peers know our avatar from the first handshake
+    const _localPreset = parseInt(localStorage.getItem('spaceAvatarId') ?? '0', 10)
+    spaceSync.start(username, _localPreset)
     window._sync = spaceSync
 
     // ── Proximity voice ────────────────────────────────────────────────────
