@@ -1,83 +1,73 @@
 /**
- * SpaceSync — the single multiplayer backend.
+ * SpaceSync — single multiplayer surface.
  *
- * Two transport tiers, one event surface:
+ * Transport: Trystero WebRTC over BitTorrent DHT (cross-machine, serverless).
+ * Room:      derived from URL hash — #team-alpha → room "sw-1-team-alpha".
+ * Identity:  Ed25519 peerId from identity/index.js (stable across sessions).
  *
- *   LocalSync  (BroadcastChannel + localStorage) — same browser, instant
- *   RemoteSync (Trystero WebRTC)                 — cross-machine, BitTorrent DHT
+ * All peers in the same URL hash land in the same P2P swarm automatically.
+ * No server, no handshake, no room codes.
  *
  * Events emitted (CustomEvent on this EventTarget):
- *   peer:join   detail: { peerId, username, source }
- *   peer:leave  detail: { peerId }
- *   peer:move   detail: { peerId, pos:{x,y,z,ry} }
- *   chat        detail: { from, username, text, ts }
- *   status      detail: { peerCount }
+ *   peer:join    detail: { peerId, username, presetId, status }
+ *   peer:leave   detail: { peerId }
+ *   peer:move    detail: { peerId, pos:{x,y,z,ry} }
+ *   peer:avatar  detail: { peerId, presetId }
+ *   peer:status  detail: { peerId, status }
+ *   chat         detail: { from, username, text, ts }
+ *   status       detail: { peerCount }
  */
 
-import { LocalSync }          from './local.js'
-import { RemoteSync, selfId } from './remote.js'
-
-export { selfId }
+import { RemoteSync }  from './remote.js'
+import { getIdentity } from '../identity/index.js'
 
 export class SpaceSync extends EventTarget {
-  #local   = null
-  #remote  = null
-  #peers    = new Map()   // peerId → { peerId, username, source }
+  #remote   = null
+  #peers    = new Map()   // identityId → { peerId, username, presetId, status }
   #started  = false
   #username = ''
   #presetId = 0
   #status   = 'available'
 
-  get peers()     { return [...this.#peers.values()] }
-  get peerCount() { return this.#peers.size }
-  get id()        { return selfId }
+  /** The current user's stable peer ID (Ed25519 hex, 64 chars). */
+  get id ()        { return getIdentity()?.peerId ?? '' }
+  get peers ()     { return [...this.#peers.values()] }
+  get peerCount () { return this.#peers.size }
 
-  async start(username, presetId = 0, status = 'available') {
+  async start (username, presetId = 0, status = 'available') {
     if (this.#started) return
     this.#started  = true
     this.#username = username
     this.#presetId = presetId
     this.#status   = status
 
-    // ── Tier 1: same-browser tabs via BroadcastChannel ────────────────────
-    this.#local = new LocalSync(username, presetId, status)
-
-    this.#local.on('PEER',   ({ from, username: u, presetId: pid = 0, status: st = 'available' }) => {
-      if (this.#peers.has(from)) return
-      this.#addPeer(from, u, 'local', pid, st)
-    })
-    this.#local.on('AVATAR', ({ from, presetId: pid }) => {
-      this.#emit('peer:avatar', { peerId: from, presetId: pid })
-    })
-    this.#local.on('STATUS', ({ from, status: st }) => {
-      this.#emit('peer:status', { peerId: from, status: st })
-    })
-    this.#local.on('BYE',    ({ from })         => this.#removePeer(from))
-    this.#local.on('MOVE',   ({ from, pos })    => this.#emit('peer:move', { peerId: from, pos }))
-    this.#local.on('COMMIT', ({ from, commit }) => this.#emit('commit', { from, commit }))
-    this.#local.on('CHAT',   ({ from, username: u, text, ts }) => {
-      this.#emit('chat', { from, username: u, text, ts })
-    })
-
-    this.#local.start()
-
-    // ── Tier 2: cross-machine via Trystero WebRTC ─────────────────────────
     this.#remote = new RemoteSync(username, presetId, status)
 
+    // ── Peer discovered ──────────────────────────────────────────────────────
     this.#remote.on('HELLO', ({ from, username: u, presetId: pid = 0, status: st = 'available' }) => {
       if (this.#peers.has(from)) return
-      this.#addPeer(from, u, 'remote', pid, st)
+      this.#addPeer(from, u, pid, st)
     })
-    this.#remote.on('AVATAR_CHANGE', ({ from, presetId: pid }) => {
-      this.#emit('peer:avatar', { peerId: from, presetId: pid })
-    })
-    this.#remote.on('STATUS_CHANGE', ({ from, status: st }) => {
-      this.#emit('peer:status', { peerId: from, status: st })
-    })
+
+    // ── Peer left ────────────────────────────────────────────────────────────
     this.#remote.on('PEER_LEAVE', ({ from }) => this.#removePeer(from))
+
+    // ── Position update ───────────────────────────────────────────────────────
     this.#remote.on('MOVE', ({ from, pos }) => {
       this.#emit('peer:move', { peerId: from, pos })
     })
+
+    // ── Avatar change ─────────────────────────────────────────────────────────
+    this.#remote.on('AVATAR_CHANGE', ({ from, presetId: pid }) => {
+      this.#emit('peer:avatar', { peerId: from, presetId: pid })
+    })
+
+    // ── Status change ─────────────────────────────────────────────────────────
+    this.#remote.on('STATUS_CHANGE', ({ from, status: st }) => {
+      this.#emit('peer:status', { peerId: from, status: st })
+    })
+
+    // ── Chat ──────────────────────────────────────────────────────────────────
     this.#remote.on('CHAT', ({ from, username: u, text, ts }) => {
       this.#emit('chat', { from, username: u, text, ts })
     })
@@ -85,71 +75,55 @@ export class SpaceSync extends EventTarget {
     await this.#remote.start()
   }
 
-  stop() {
-    this.#local?.stop()
+  stop () {
     this.#remote?.stop()
+    this.#remote = null
     this.#peers.clear()
     this.#started = false
   }
 
-  move(x, y, z, ry = 0) {
-    this.#local?.move(x, y, z, ry)
-    this.#remote?.move(x, y, z, ry)
-  }
+  // ── Outbound ──────────────────────────────────────────────────────────────
 
-  broadcastCommit(data) {
-    this.#local?.commit(data)
-  }
+  move (x, y, z, ry = 0)  { this.#remote?.move(x, y, z, ry) }
 
-  /** Broadcast a new avatar preset to all peers (local + remote). */
-  setAvatar(presetId) {
+  setAvatar (presetId) {
     this.#presetId = presetId
-    this.#local?.avatar(presetId)
     this.#remote?.setAvatar(presetId)
   }
 
-  /** Broadcast a new status to all peers. */
-  setStatus(status) {
+  setStatus (status) {
     this.#status = status
-    this.#local?.status(status)
     this.#remote?.setStatus(status)
   }
 
-  // ── Proximity voice ────────────────────────────────────────────────────────
-  /** Broadcast a local audio track to all remote peers (WebRTC only — no BroadcastChannel). */
-  addVoiceTrack (track, stream) { this.#remote?.addVoiceTrack(track, stream) }
-  /** Called back whenever a remote peer sends us their audio track. */
-  onVoiceTrack (cb)             { this.#remote?.onVoiceTrack(cb) }
-
-  /**
-   * Broadcast a chat message to all peers (local tabs + remote machines).
-   * @param {string} text
-   */
-  sendChat(text) {
+  sendChat (text) {
     if (!text.trim()) return
     const ts = Date.now()
-    // Fire locally so the sender sees their own message immediately
+    // Echo locally so the sender sees their own message immediately
     this.#emit('chat', { from: this.id, username: this.#username, text, ts })
-    this.#local?.chat(this.#username, text)
     this.#remote?.chat(text)
   }
 
-  // ── internal ───────────────────────────────────────────────────────────────
+  // ── Proximity voice ───────────────────────────────────────────────────────
+  addVoiceTrack (track, stream) { this.#remote?.addVoiceTrack(track, stream) }
+  onVoiceTrack  (cb)            { this.#remote?.onVoiceTrack(cb) }
 
-  #addPeer(peerId, username, source, presetId = 0, status = 'available') {
-    this.#peers.set(peerId, { peerId, username, source, presetId, status })
-    this.#emit('peer:join',  { peerId, username, source, presetId, status })
+  // ── Internal ──────────────────────────────────────────────────────────────
+
+  #addPeer (peerId, username, presetId, status) {
+    this.#peers.set(peerId, { peerId, username, presetId, status })
+    this.#emit('peer:join',  { peerId, username, presetId, status })
     this.#emit('status',     { peerCount: this.#peers.size })
   }
 
-  #removePeer(peerId) {
+  #removePeer (peerId) {
     if (!this.#peers.has(peerId)) return
     this.#peers.delete(peerId)
     this.#emit('peer:leave', { peerId })
     this.#emit('status',     { peerCount: this.#peers.size })
   }
 
-  #emit(type, detail) {
+  #emit (type, detail) {
     this.dispatchEvent(new CustomEvent(type, { detail }))
   }
 }
