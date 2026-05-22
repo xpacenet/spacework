@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite'
 
-// VITE_BASE_URL is injected by CI when deploying to a GitHub Pages project page
-// (e.g. /spacework/). Falls back to '/' for local dev and custom domains.
+// './' = relative asset paths, required for IPFS where the app lives at
+// /ipfs/<CID>/ rather than the root. Works for local dev too.
 export default defineConfig({
-  base: process.env.VITE_BASE_URL ?? '/',
+  base: './',
   test: {
     environment: 'node',
     coverage: {
