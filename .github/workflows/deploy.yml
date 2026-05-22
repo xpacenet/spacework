@@ -1,10 +1,12 @@
-name: Deploy to IPFS
+name: Deploy
 
-# Triggers: every push to main, or manual trigger from GitHub UI
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: write   # needed to push to gh-pages branch
 
 jobs:
   deploy:
@@ -14,134 +16,80 @@ jobs:
       # ── 1. Checkout ──────────────────────────────────────────────────────────
       - uses: actions/checkout@v4
 
-      # ── 2. Node setup ────────────────────────────────────────────────────────
+      # ── 2. Node ──────────────────────────────────────────────────────────────
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: client/package-lock.json
 
-      # ── 3. Install & build ───────────────────────────────────────────────────
+      # ── 3. Build ─────────────────────────────────────────────────────────────
       - name: Install dependencies
         run: cd client && npm ci
 
       - name: Build
         run: cd client && npm run build
-        # base: './' in vite.config.js ensures all asset paths are relative,
-        # which is required for IPFS where content lives at /ipfs/<CID>/
+        # vite.config.js uses base: './' so all asset paths are relative.
+        # This works on GitHub Pages (served at /spacework/) without needing
+        # the repo name hardcoded, and also works on IPFS gateways.
 
-      # ── 4. Pin to IPFS via Storacha ──────────────────────────────────────────
-      # Storacha (@storacha/cli) is open source (MIT).
-      # Content is pinned to both IPFS and Filecoin — persists even if you're offline.
+      # ── 4. Deploy to GitHub Pages ────────────────────────────────────────────
+      # Pushes client/dist to the gh-pages branch.
+      # GitHub Pages then serves it at: https://xpacenet.github.io/spacework/
       #
-      # Requires two GitHub secrets (see DEPLOY.md for setup):
-      #   STORACHA_PRINCIPAL  — signing key for the CI agent
-      #   STORACHA_PROOF      — delegation proof granting upload rights
-      - name: Pin to IPFS via Storacha
-        id: upload
-        run: |
-          npm install -g @storacha/cli
+      # Hash routing (#room-name) is handled entirely in the browser so
+      # no 404 redirect tricks are needed — it just works.
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./client/dist
+          commit_message: "deploy: ${{ github.sha }}"
 
-          # Import the delegation proof so the CI key can upload to your space
-          storacha space add "$STORACHA_PROOF"
-
-          # Upload the built app. --no-wrap keeps dist/ as the root (not wrapped
-          # in an extra directory), so index.html is at /ipfs/<CID>/index.html
-          UPLOAD_OUTPUT=$(storacha up ./client/dist --no-wrap 2>&1)
-          echo "$UPLOAD_OUTPUT"
-
-          # Extract the CIDv1 (starts with 'bafy', base32, 59+ chars)
-          CID=$(echo "$UPLOAD_OUTPUT" | grep -oP 'bafy[a-zA-Z2-7]{55,}' | tail -1)
-
-          if [ -z "$CID" ]; then
-            echo "ERROR: Could not extract CID from storacha output"
-            exit 1
-          fi
-
-          echo "cid=$CID" >> "$GITHUB_OUTPUT"
-          echo "Uploaded CID: $CID"
-        env:
-          STORACHA_PRINCIPAL: ${{ secrets.STORACHA_PRINCIPAL }}
-          STORACHA_PROOF: ${{ secrets.STORACHA_PROOF }}
-
-      # ── 5. Publish IPNS (stable mutable address) ─────────────────────────────
-      # Uses Kubo (go-ipfs, MIT) — the reference IPFS node.
-      # IPNS gives you one stable address that always points to your latest build.
+      # ── 5. Compute IPFS CID (no pinning service needed) ──────────────────────
+      # Installs Kubo locally in the CI runner, adds the built files in
+      # offline mode (no network, no account), and prints the CID.
       #
-      # Requires one more GitHub secret (see DEPLOY.md for key generation):
-      #   IPNS_KEY_B64  — base64-encoded Kubo Ed25519 key export
-      #
-      # OPTIONAL: if IPNS_KEY_B64 is not set, this step is skipped.
-      # You still get the immutable IPFS gateway link from step 4.
-      - name: Install Kubo (IPFS node)
-        if: ${{ secrets.IPNS_KEY_B64 != '' }}
+      # The CID is the cryptographic hash of the exact content that was deployed.
+      # Anyone can verify it. If you later want to pin it to IPFS, this is the
+      # address to use — via your local node, Pinata, Storacha, or any service.
+      - name: Compute IPFS CID
+        id: ipfs
         run: |
           KUBO_VERSION="v0.32.1"
           wget -qO kubo.tar.gz \
             "https://dist.ipfs.tech/kubo/${KUBO_VERSION}/kubo_${KUBO_VERSION}_linux-amd64.tar.gz"
           tar -xzf kubo.tar.gz
           sudo ./kubo/install.sh
-          ipfs --version
-
-      - name: Publish to IPNS
-        if: ${{ secrets.IPNS_KEY_B64 != '' }}
-        run: |
           ipfs init --profile=lowpower
 
-          # Start daemon briefly so the IPNS record propagates to the DHT
-          ipfs daemon --enable-gc=false &
-          DAEMON_PID=$!
-          # Wait until the API port is ready
-          for i in $(seq 1 20); do
-            ipfs id >/dev/null 2>&1 && break || sleep 1
-          done
-
-          # Import the persistent IPNS signing key from the secret
-          echo "${{ secrets.IPNS_KEY_B64 }}" | base64 -d > /tmp/spacework.key
-          ipfs key import spacework /tmp/spacework.key
-          rm -f /tmp/spacework.key
-
-          # Publish: point the IPNS name at the new CID
-          ipfs name publish --key=spacework "/ipfs/${{ steps.upload.outputs.cid }}"
-
-          # Read back the IPNS address for the summary
-          IPNS_ADDR=$(ipfs key list -l | awk '/spacework/{print $1}')
-          echo "ipns=$IPNS_ADDR" >> "$GITHUB_OUTPUT"
-
-          # Graceful daemon shutdown
-          kill "$DAEMON_PID" 2>/dev/null || true
-          wait "$DAEMON_PID" 2>/dev/null || true
-        id: ipns
+          # --offline: compute CID from content locally, no daemon or network needed
+          # --cid-version=1: produces a bafybei... CIDv1 (shorter, case-insensitive)
+          # -Q: quiet — only print the root CID
+          CID=$(ipfs add -r --cid-version=1 -Q --offline ./client/dist)
+          echo "cid=$CID" >> "$GITHUB_OUTPUT"
 
       # ── 6. Job summary ───────────────────────────────────────────────────────
       - name: Write deploy summary
-        if: always() && steps.upload.outputs.cid != ''
         run: |
-          CID="${{ steps.upload.outputs.cid }}"
-          IPNS="${{ steps.ipns.outputs.ipns }}"
+          REPO="${{ github.event.repository.name }}"
+          OWNER="${{ github.repository_owner }}"
+          CID="${{ steps.ipfs.outputs.cid }}"
+          SHA="${{ github.sha }}"
 
-          echo "## 🚀 SpaceWork deployed to IPFS" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 🚀 SpaceWork deployed" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| | |" >> "$GITHUB_STEP_SUMMARY"
+          echo "### GitHub Pages" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Room | Link |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| **CID** | \`$CID\` |" >> "$GITHUB_STEP_SUMMARY"
-
-          if [ -n "$IPNS" ]; then
-            echo "| **IPNS** | \`$IPNS\` |" >> "$GITHUB_STEP_SUMMARY"
-          fi
-
+          echo "| Default | https://${OWNER}.github.io/${REPO}/#main |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Share with team | \`https://${OWNER}.github.io/${REPO}/#your-room-name\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### Gateways" >> "$GITHUB_STEP_SUMMARY"
-          echo "- <https://${CID}.ipfs.dweb.link/> ← this build (immutable)" >> "$GITHUB_STEP_SUMMARY"
-
-          if [ -n "$IPNS" ]; then
-            echo "- <https://${IPNS}.ipns.dweb.link/> ← always latest (IPNS)" >> "$GITHUB_STEP_SUMMARY"
-          fi
-
+          echo "### IPFS Content Hash" >> "$GITHUB_STEP_SUMMARY"
+          echo "This build's CID (content-addressed, self-verifying):" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "$CID" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`\`\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Pin it any time: \`ipfs pin add $CID\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Share either link — the IPNS one stays the same on every deploy." >> "$GITHUB_STEP_SUMMARY"
-
-          if [ -z "$IPNS" ]; then
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "> **Tip:** Add \`IPNS_KEY_B64\` secret for a stable address. See \`DEPLOY.md\`." >> "$GITHUB_STEP_SUMMARY"
-          fi
+          echo "Commit: \`${SHA:0:7}\`" >> "$GITHUB_STEP_SUMMARY"
