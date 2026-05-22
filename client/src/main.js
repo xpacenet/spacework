@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { AVATAR_PRESETS }    from './player/avatar.js'
+import { AVATAR_PRESETS, createLocalAvatar, animateWalk } from './player/avatar.js'
 import { initScene }         from './scene/index.js'
 import { buildScreens }      from './scene/screens.js'
 import { initPlayer }        from './player/index.js'
@@ -237,7 +237,9 @@ function startBoarding() {
       const { peerId, username: peerName } = e.detail
       _peerUsernames.set(peerId, peerName)
       if (_avatars.has(peerId)) return
-      const av = _makeAvatar(peerName)
+      // Assign a deterministic preset from the peer ID so the same peer always
+      // gets the same avatar colour across sessions (upgradeable to user-chosen later)
+      const av = createLocalAvatar(peerName, _presetFromId(peerId))
       scene.add(av)
       _avatars.set(peerId, av)
       _updateOnlineCount(hud, _avatars.size + 1)
@@ -248,9 +250,22 @@ function startBoarding() {
       const { peerId, pos } = e.detail
       const av = _avatars.get(peerId)
       if (av) {
-        // Lerp at 0.6 — fast enough to feel real-time at 50ms broadcast interval
-        av.position.lerp(new THREE.Vector3(pos.x, pos.y, pos.z), 0.6)
-        if (pos.ry !== undefined) av.rotation.y = pos.ry
+        const prev = av.position.clone()
+        // Lerp position — fast enough to feel real-time at 50ms broadcast interval
+        av.position.lerp(new THREE.Vector3(pos.x, pos.y ?? 0, pos.z), 0.6)
+        // Smooth yaw rotation — shortest-arc lerp so avatar turns naturally
+        if (pos.ry !== undefined) {
+          let d = pos.ry - av.rotation.y
+          while (d >  Math.PI) d -= Math.PI * 2
+          while (d < -Math.PI) d += Math.PI * 2
+          av.rotation.y += d * 0.25
+        }
+        // Detect actual movement to drive walk animation
+        if (prev.distanceTo(av.position) > 0.008) {
+          av.userData.isMoving = true
+          clearTimeout(av.userData._stopTimer)
+          av.userData._stopTimer = setTimeout(() => { av.userData.isMoving = false }, 180)
+        }
       }
       player.peerMove(peerId, pos.x, pos.z, _peerUsernames.get(peerId) ?? peerId.slice(-4))
     })
@@ -265,6 +280,18 @@ function startBoarding() {
       player.peerLeave(e.detail.peerId)
       _peerUsernames.delete(e.detail.peerId)
     })
+
+    // ── Peer avatar animation loop ─────────────────────────────────────────
+    // Runs independently of the player tick so peer walk animation stays
+    // smooth even when the local player is idle.
+    let _peerTickLast = performance.now()
+    ;(function _tickPeers () {
+      requestAnimationFrame(_tickPeers)
+      const now   = performance.now()
+      const delta = Math.min((now - _peerTickLast) / 1000, 0.1)
+      _peerTickLast = now
+      _avatars.forEach(av => animateWalk(av, av.userData.isMoving ?? false, delta))
+    })()
 
     // Start sync only after listeners are ready — peers detected before this would fire into void
     spaceSync.start(username)
@@ -477,33 +504,13 @@ function startBoarding() {
   })
 }
 
-// ── Shared avatar factory (used by both local and remote peer handlers) ───
-function _makeAvatar(name) {
-  const group   = new THREE.Group()
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x4488ff, roughness: 0.7 })
-  const headMat = new THREE.MeshStandardMaterial({ color: 0xffbb88, roughness: 0.8 })
-  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.25, 0.8, 4, 8), bodyMat)
-  body.position.y = 0.9
-  group.add(body)
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 12), headMat)
-  head.position.y = 1.7
-  group.add(head)
-  const cvs = document.createElement('canvas')
-  cvs.width = 256; cvs.height = 64
-  const ctx = cvs.getContext('2d')
-  ctx.fillStyle = 'rgba(40,100,255,0.8)'
-  ctx.roundRect(0, 0, 256, 64, 12); ctx.fill()
-  ctx.fillStyle = '#fff'
-  ctx.font = 'bold 26px Inter,sans-serif'
-  ctx.textAlign = 'center'
-  ctx.fillText(name, 128, 42)
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: new THREE.CanvasTexture(cvs), transparent: true,
-  }))
-  sprite.position.y = 2.15
-  sprite.scale.set(1.4, 0.35, 1)
-  group.add(sprite)
-  return group
+// ── Peer avatar helpers ────────────────────────────────────────────────────
+
+/** Deterministic preset 0-5 from a peer ID string (hash-based). */
+function _presetFromId (id) {
+  let h = 0
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0
+  return Math.abs(h) % AVATAR_PRESETS.length
 }
 
 function _updateOnlineCount(hud, count) {
