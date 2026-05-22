@@ -5,33 +5,32 @@ import { BLDG } from './building.js'
 export function buildOutdoors (scene) {
   const B = BLDG
 
-  // ── GRASS ──────────────────────────────────────────────────────────────
-  const grassMat = new THREE.MeshStandardMaterial({
-    color: 0x4a7c3f, roughness: 0.97, metalness: 0,
+  // ── GROUND — very dark tarmac / night earth ────────────────────────────
+  const groundMat = new THREE.MeshStandardMaterial({
+    color: 0x07090d, roughness: 0.96, metalness: 0.04,
   })
-  const grass = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), grassMat)
-  grass.rotation.x = -Math.PI / 2
-  grass.position.y = -0.01
-  scene.add(grass)
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), groundMat)
+  ground.rotation.x = -Math.PI / 2
+  ground.position.y = -0.01
+  scene.add(ground)
 
   // ── CONCRETE PATH (entrance) ──────────────────────────────────────────
   const pathMat = new THREE.MeshStandardMaterial({
-    color: 0xbeb8b0, roughness: 0.88, metalness: 0,
+    color: 0x14161c, roughness: 0.85, metalness: 0.10,
   })
-  // Main path from player spawn to front door
+  // Main path from spawn to front door
   const path = new THREE.Mesh(new THREE.BoxGeometry(5, 0.06, 18), pathMat)
-  path.position.set(0, 0.03, 19)  // z: 12 (building face) to 28 (near spawn)
+  path.position.set(0, 0.03, 19)
   scene.add(path)
 
-  // Wide entrance plaza in front of building
+  // Wide entrance plaza
   const plaza = new THREE.Mesh(new THREE.BoxGeometry(12, 0.06, 8), pathMat)
   plaza.position.set(0, 0.03, 14.5)
   scene.add(plaza)
 
   // ── BUILDING FOUNDATION ────────────────────────────────────────────────
-  // Raised concrete base the building sits on
   const foundMat = new THREE.MeshStandardMaterial({
-    color: 0xa8a298, roughness: 0.9, metalness: 0,
+    color: 0x0e1018, roughness: 0.88, metalness: 0.12,
   })
   const W = B.maxX - B.minX
   const D = B.maxZ - B.minZ
@@ -39,7 +38,7 @@ export function buildOutdoors (scene) {
   found.position.set(0, -0.1, (B.minZ + B.maxZ) / 2)
   scene.add(found)
 
-  // ── TREES ─────────────────────────────────────────────────────────────
+  // ── TREES — dark silhouettes against the night sky ────────────────────
   const treePositions = [
     [-30, -18], [-30, 5], [-30, 20],
     [ 30, -18], [ 30, 5], [ 30, 20],
@@ -51,27 +50,24 @@ export function buildOutdoors (scene) {
 
   // ── STREET LAMPS ──────────────────────────────────────────────────────
   const lampPositions = [
-    [-4, 24], [4, 24],     // flanking path
-    [-14, 14], [14, 14],   // plaza corners
+    [-4, 24], [4, 24],
+    [-14, 14], [14, 14],
   ]
   lampPositions.forEach(([x, z]) => addLamp(scene, x, z))
 
-  // ── DISTANT HILLS / GROUND VARIATION ─────────────────────────────────
-  // Low dark hills at horizon
+  // ── DISTANT CITY GLOW — low horizon mist ─────────────────────────────
   addHorizon(scene)
 }
 
-// ── Tree ──────────────────────────────────────────────────────────────────
+// ── Tree — dark silhouette ────────────────────────────────────────────────
 function addTree (scene, x, z) {
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5a3820, roughness: 0.9 })
-  const leafMat  = new THREE.MeshStandardMaterial({ color: 0x2d6e28, roughness: 0.95 })
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x0e0906, roughness: 0.95 })
+  const leafMat  = new THREE.MeshStandardMaterial({ color: 0x060e04, roughness: 0.97 })
 
-  // Trunk
   const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.26, 2.2, 7), trunkMat)
   trunk.position.set(x, 1.1, z)
   scene.add(trunk)
 
-  // Leaf canopy — stacked cones
   const cone1 = new THREE.Mesh(new THREE.ConeGeometry(1.8, 2.5, 8), leafMat)
   cone1.position.set(x, 3.4, z)
   scene.add(cone1)
@@ -83,11 +79,11 @@ function addTree (scene, x, z) {
   scene.add(cone3)
 }
 
-// ── Street lamp ───────────────────────────────────────────────────────────
+// ── Street lamp — warm sodium glow ───────────────────────────────────────
 function addLamp (scene, x, z) {
-  const poleMat = new THREE.MeshStandardMaterial({ color: 0x444440, roughness: 0.6, metalness: 0.7 })
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x1a1c20, roughness: 0.5, metalness: 0.8 })
   const headMat = new THREE.MeshStandardMaterial({
-    color: 0xfff5cc, emissive: 0xfff0aa, emissiveIntensity: 2.0, roughness: 0.4,
+    color: 0xffffff, emissive: 0xffe8aa, emissiveIntensity: 5.0, roughness: 0.3,
   })
 
   // Pole
@@ -95,20 +91,25 @@ function addLamp (scene, x, z) {
   pole.position.set(x, 2.25, z)
   scene.add(pole)
 
-  // Lamp head
+  // Lamp head — glows hard with bloom
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), headMat)
   head.position.set(x, 4.7, z)
   scene.add(head)
 
-  // Glow point light
-  const light = new THREE.PointLight(0xfff0aa, 8, 12)
+  // Strong warm point light
+  const light = new THREE.PointLight(0xffcc66, 18, 16)
   light.position.set(x, 4.7, z)
   scene.add(light)
+
+  // Tiny ground halo (very soft, low fill)
+  const halo = new THREE.PointLight(0xffaa44, 6, 6)
+  halo.position.set(x, 0.2, z)
+  scene.add(halo)
 }
 
-// ── Horizon hills ─────────────────────────────────────────────────────────
+// ── Horizon — dark hills silhouette ──────────────────────────────────────
 function addHorizon (scene) {
-  const hillMat = new THREE.MeshStandardMaterial({ color: 0x3a5e2a, roughness: 1 })
+  const hillMat = new THREE.MeshStandardMaterial({ color: 0x060809, roughness: 1 })
   const hillData = [
     [-80, -60, 30, 8, 20],
     [ 80, -60, 28, 7, 18],
