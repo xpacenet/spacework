@@ -10,6 +10,7 @@ import { SwarmNetwork, SwarmNode } from './network/swarm.js'
 import { VisibilityLayer, VISIBILITY } from './network/visibility.js'
 import { openNetworkMap }    from './ui/networkMap.js'
 import { ProximityVoice }   from './ui/proximityVoice.js'
+import { PresencePanel }    from './ui/presencePanel.js'
 import { spaceSync, selfId } from './sync/index.js'
 import { WorldHistory }      from './universe/index.js'
 
@@ -154,8 +155,18 @@ function startBoarding() {
     const { openScreen, isOpen }            = initScreenOverlay()
 
     // ── Player ────────────────────────────────────────────────────────────
-    const player = initPlayer(scene, camera, renderer, updateZoneUI,
-      (presetId) => spaceSync.setAvatar(presetId)
+    // ── Presence panel ────────────────────────────────────────────────────
+    const presence = new PresencePanel((dest) => player?.navigate(dest))
+    const ppEl     = document.getElementById('presence-panel')
+    if (ppEl) ppEl.classList.add('pp-visible')
+    presence.setSelf(username, _localPreset, 'OUTSIDE')
+
+    const player = initPlayer(scene, camera, renderer,
+      (zone) => { updateZoneUI(zone); presence.updateSelfZone(zone) },
+      (presetId) => {
+        spaceSync.setAvatar(presetId)
+        presence.setSelf(username, presetId, presence._self.zone)
+      }
     )
 
     // ── View toggle pill (2D / 3rd / 1st) ────────────────────────────────
@@ -241,16 +252,19 @@ function startBoarding() {
       _peerUsernames.set(peerId, peerName)
       if (_avatars.has(peerId)) return
       // Use the peer's actual chosen preset; fall back to hash-based if not yet known
-      const av = createLocalAvatar(peerName, peerPreset ?? _presetFromId(peerId))
+      const resolvedPreset = peerPreset ?? _presetFromId(peerId)
+      const av = createLocalAvatar(peerName, resolvedPreset)
       scene.add(av)
       _avatars.set(peerId, av)
       _updateOnlineCount(hud, _avatars.size + 1)
+      presence.addPeer(peerId, peerName, resolvedPreset)
       player.peerJoin(peerId, peerName)
     })
 
     spaceSync.addEventListener('peer:move', e => {
       const { peerId, pos } = e.detail
       const av = _avatars.get(peerId)
+      presence.movePeer(peerId, pos.x, pos.z)
       if (av) {
         const prev = av.position.clone()
         // Lerp position — fast enough to feel real-time at 50ms broadcast interval
@@ -280,6 +294,7 @@ function startBoarding() {
         _updateOnlineCount(hud, _avatars.size + 1)
       }
       voice.removePeer(e.detail.peerId)
+      presence.removePeer(e.detail.peerId)
       player.peerLeave(e.detail.peerId)
       _peerUsernames.delete(e.detail.peerId)
     })
@@ -290,6 +305,7 @@ function startBoarding() {
       const av   = _avatars.get(peerId)
       const name = _peerUsernames.get(peerId) ?? peerId.slice(-4)
       if (av) applyPreset(av, name, presetId)
+      presence.updatePeerPreset(peerId, presetId)
     })
 
     // ── Peer avatar animation loop ─────────────────────────────────────────
