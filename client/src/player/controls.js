@@ -53,10 +53,8 @@ export function setupControls (avatar, camera, domElement) {
   // ── Mouse look / drag ─────────────────────────────────────────────────────
   document.addEventListener('mousemove', e => {
     if (document.pointerLockElement === domElement) {
-      if (mode === 'third' || mode === 'first') {
-        yaw   -= e.movementX * 0.0025
-        if (mode === 'first') pitch = Math.max(-1.2, Math.min(0.5, pitch - e.movementY * 0.002))
-      }
+      if (mode === 'first') pitch = Math.max(-1.2, Math.min(0.5, pitch - e.movementY * 0.002))
+      yaw -= e.movementX * 0.0025
       return
     }
     if (_dragging) {
@@ -84,15 +82,20 @@ export function setupControls (avatar, camera, domElement) {
       }
     }
   })
-  domElement.addEventListener('mousedown', () => {
+  domElement.addEventListener('mousedown', e => {
+    // Right-click owns camera orbit in 3rd-person and pan in overview.
+    // Left-click is reserved for click-to-navigate — no conflict.
+    if (e.button !== 2) return
     _dragging = true; _dragMoved = false
     if (mode === 'overview') domElement.style.cursor = 'grabbing'
   })
-  document.addEventListener('mouseup', () => {
+  document.addEventListener('mouseup', e => {
+    if (e.button !== 2) return
     _dragging = false
     if (mode === 'overview') domElement.style.cursor = 'grab'
-    // flat mode canvas manages its own cursor — nothing to do here
   })
+  // Suppress the browser context menu so right-click drag doesn't pop it up
+  domElement.addEventListener('contextmenu', e => e.preventDefault())
 
   // ── Scroll-to-zoom (overview: camera height / 3rd-person: arm length) ────
   domElement.addEventListener('wheel', e => {
