@@ -451,25 +451,31 @@
       #ipfs-peers { color: rgba(255,255,255,0.35); margin-left: 4px; }
 
       /* HUD network map button */
-      #nm-open-btn {
-        position: absolute; top: 56px; right: 20px;
-        background: rgba(0,10,40,0.8); border: 1px solid rgba(100,150,255,0.3);
-        color: rgba(255,255,255,0.8); padding: 6px 14px; border-radius: 8px;
-        font-size: 0.75rem; font-weight: 600; cursor: pointer; font-family: inherit;
-        pointer-events: all; transition: all 0.15s;
-        letter-spacing: 0.05em;
-      }
-      #nm-open-btn:hover { background: rgba(60,100,220,0.3); border-color: #4466ff; color: #fff; }
+      #nm-open-btn { top: 56px; }
 
-      /* Avatar button */
-      #avatar-btn {
-        position: absolute; top: 56px; left: 20px;
+      /* Shared style for right-side HUD buttons */
+      .hud-side-btn {
+        position: absolute; right: 20px;
         background: rgba(0,10,40,0.8); border: 1px solid rgba(100,150,255,0.3);
         color: rgba(255,255,255,0.8); padding: 6px 14px; border-radius: 8px;
         font-size: 0.75rem; font-weight: 600; cursor: pointer; font-family: inherit;
         pointer-events: all; transition: all 0.15s; letter-spacing: 0.05em;
       }
-      #avatar-btn:hover { background: rgba(60,100,220,0.3); border-color: #4466ff; color: #fff; }
+      .hud-side-btn:hover { background: rgba(60,100,220,0.3); border-color: #4466ff; color: #fff; }
+      .hud-side-btn.voice-active {
+        background: rgba(0,180,80,0.18); border-color: rgba(0,220,100,0.5); color: #00e676;
+        animation: voicePulse 2s ease-in-out infinite;
+      }
+      .hud-side-btn.voice-muted {
+        background: rgba(200,40,40,0.18); border-color: rgba(255,80,80,0.4); color: #ff6b6b;
+      }
+      @keyframes voicePulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(0,220,100,0); }
+        50%       { box-shadow: 0 0 0 4px rgba(0,220,100,0.2); }
+      }
+
+      /* Avatar button */
+      #avatar-btn { position: absolute; top: 56px; left: 20px; }
 
       /* ── Avatar picker modal ──────────────────────────────────────────── */
       #avatar-picker {
@@ -566,15 +572,9 @@
 
       /* ── CHAT ─────────────────────────────────────────────────────────── */
       #chat-toggle {
-        position: absolute; top: 92px; right: 20px;
-        background: rgba(0,10,40,0.8); border: 1px solid rgba(100,150,255,0.3);
-        color: rgba(255,255,255,0.8); padding: 6px 14px; border-radius: 8px;
-        font-size: 0.75rem; font-weight: 600; cursor: pointer; font-family: inherit;
-        pointer-events: all; transition: all 0.15s; letter-spacing: 0.05em;
-        display: flex; align-items: center; gap: 6px;
+        top: 92px; display: flex; align-items: center; gap: 6px;
       }
-      #chat-toggle:hover { background: rgba(60,100,220,0.3); border-color: #4466ff; color: #fff; }
-      #chat-toggle.open  { background: rgba(30,60,180,0.5); border-color: #4488ff; color: #fff; }
+      #chat-toggle.open { background: rgba(30,60,180,0.5); border-color: #4488ff; color: #fff; }
 
       /* Unread badge */
       #chat-badge {
@@ -817,13 +817,12 @@
       </div>
 
       <!-- Avatar picker button -->
-      <button id="avatar-btn">🧑 Avatar</button>
+      <button id="avatar-btn" class="hud-side-btn" style="top:56px;right:auto;left:20px">🧑 Avatar</button>
 
-      <!-- Network map button -->
-      <button id="nm-open-btn">🌐 Network</button>
-
-      <!-- Chat toggle button -->
-      <button id="chat-toggle">💬 Chat <span id="chat-badge"></span></button>
+      <!-- Right-side HUD buttons (stacked vertically) -->
+      <button id="nm-open-btn"  class="hud-side-btn">🌐 Network</button>
+      <button id="chat-toggle"  class="hud-side-btn" style="top:92px">💬 Chat <span id="chat-badge"></span></button>
+      <button id="voice-btn"    class="hud-side-btn" style="top:128px">🎙 Voice</button>
 
       <!-- Chat panel -->
       <div id="chat-panel">

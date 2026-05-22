@@ -9,6 +9,7 @@ import { initScreenOverlay } from './ui/screenOverlay.js'
 import { SwarmNetwork, SwarmNode } from './network/swarm.js'
 import { VisibilityLayer, VISIBILITY } from './network/visibility.js'
 import { openNetworkMap }    from './ui/networkMap.js'
+import { ProximityVoice }   from './ui/proximityVoice.js'
 import { spaceSync, selfId } from './sync/index.js'
 import { WorldHistory }      from './universe/index.js'
 
@@ -277,6 +278,7 @@ function startBoarding() {
         _avatars.delete(e.detail.peerId)
         _updateOnlineCount(hud, _avatars.size + 1)
       }
+      voice.removePeer(e.detail.peerId)
       player.peerLeave(e.detail.peerId)
       _peerUsernames.delete(e.detail.peerId)
     })
@@ -297,11 +299,45 @@ function startBoarding() {
     spaceSync.start(username)
     window._sync = spaceSync
 
-    // Broadcast own position + rotation every 50ms
+    // ── Proximity voice ────────────────────────────────────────────────────
+    const voice    = new ProximityVoice()
+    const voiceBtn = document.getElementById('voice-btn')
+
+    const _updateVoiceBtn = ({ active, muted } = {}) => {
+      if (!voiceBtn) return
+      if (!active) {
+        voiceBtn.textContent  = '🎙 Voice'
+        voiceBtn.className    = 'hud-side-btn'
+      } else if (muted) {
+        voiceBtn.textContent  = '🔇 Muted'
+        voiceBtn.className    = 'hud-side-btn voice-muted'
+      } else {
+        voiceBtn.textContent  = '🎙 Live'
+        voiceBtn.className    = 'hud-side-btn voice-active'
+      }
+    }
+    voice.onStateChange(_updateVoiceBtn)
+    _updateVoiceBtn({ active: false, muted: false })
+
+    if (voiceBtn) {
+      voiceBtn.addEventListener('click', async e => {
+        e.stopPropagation()
+        if (!voice.active) {
+          voiceBtn.textContent = '⏳ Connecting…'
+          const ok = await voice.start(spaceSync)
+          if (!ok) { voiceBtn.textContent = '🚫 No mic'; return }
+        } else {
+          voice.toggleMute()
+        }
+      })
+    }
+
+    // Broadcast own position + rotation every 50ms; update voice proximity
     setInterval(() => {
       const pos = player.getPosition()
       const rot = player.getRotation()
       spaceSync.move(pos.x, pos.y, pos.z, rot.y)
+      voice.update(pos, _avatars)
     }, 50)
 
     // ── Chat ──────────────────────────────────────────────────────────────

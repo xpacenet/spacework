@@ -87,6 +87,12 @@ export class SpaceSync extends EventTarget {
     this.#local?.commit(data)
   }
 
+  // ── Proximity voice ────────────────────────────────────────────────────────
+  /** Broadcast a local audio track to all remote peers (WebRTC only — no BroadcastChannel). */
+  addVoiceTrack (track, stream) { this.#remote?.addVoiceTrack(track, stream) }
+  /** Called back whenever a remote peer sends us their audio track. */
+  onVoiceTrack (cb)             { this.#remote?.onVoiceTrack(cb) }
+
   /**
    * Broadcast a chat message to all peers (local tabs + remote machines).
    * @param {string} text

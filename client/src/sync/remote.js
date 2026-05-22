@@ -75,6 +75,17 @@ export class RemoteSync {
     this.#room?.leave()
   }
 
+  // ── Proximity voice (WebRTC media tracks) ─────────────────────────────────
+  /** Broadcast a local audio track to all current and future remote peers. */
+  addVoiceTrack (track, stream) {
+    this.#room?.addTrack(track, stream)
+  }
+
+  /** Register a callback for incoming audio tracks from remote peers. */
+  onVoiceTrack (cb) {
+    this.#room?.onTrack((track, stream, peerId) => cb(track, stream, peerId))
+  }
+
   move(x, y, z, ry = 0) {
     this.#sendMove?.({ pos: { x, y, z, ry } })
   }
