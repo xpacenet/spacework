@@ -77,7 +77,8 @@ function addTree (scene, x, z) {
   scene.add(trunk)
 
   // Stacked cones give a believable deciduous silhouette
-  [[1.8, 2.5, 3.4], [1.3, 2.0, 4.8], [0.7, 1.4, 6.0]].forEach(([r, h, y]) => {
+  // (leading ; prevents ASI treating [[ as a subscript on scene.add's return value)
+  ;[[1.8, 2.5, 3.4], [1.3, 2.0, 4.8], [0.7, 1.4, 6.0]].forEach(([r, h, y]) => {
     const cone = new THREE.Mesh(new THREE.ConeGeometry(r, h, 9), leafMat)
     cone.position.set(x, y, z)
     cone.castShadow = true
