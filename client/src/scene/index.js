@@ -1,11 +1,7 @@
 import * as THREE from 'three'
-import { EffectComposer }  from 'three/addons/postprocessing/EffectComposer.js'
-import { RenderPass }      from 'three/addons/postprocessing/RenderPass.js'
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
-import { buildBuilding }   from './building.js'
-import { buildOutdoors }   from './outdoors.js'
-import { buildDoors }      from './doors.js'
-import { buildStarfield }  from './environment.js'
+import { buildBuilding }  from './building.js'
+import { buildOutdoors }  from './outdoors.js'
+import { buildDoors }     from './doors.js'
 
 // ── Scene initialiser ─────────────────────────────────────────────────────
 export function initScene (onProgress) {
@@ -13,83 +9,80 @@ export function initScene (onProgress) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
   renderer.setSize(window.innerWidth, window.innerHeight)
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-  renderer.shadowMap.enabled = false
+  renderer.shadowMap.enabled = true
+  renderer.shadowMap.type    = THREE.PCFSoftShadowMap
   renderer.toneMapping        = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1.1
+  renderer.toneMappingExposure = 1.0
 
   const scene = new THREE.Scene()
 
-  // ── Night sky ─────────────────────────────────────────────────────────────
-  scene.background = new THREE.Color(0x05070e)
-  scene.fog = new THREE.FogExp2(0x05070e, 0.013)
+  // ── Daytime sky — clear afternoon blue ───────────────────────────────────
+  scene.background = new THREE.Color(0x8ec8e8)
+  scene.fog = new THREE.FogExp2(0xaad4e8, 0.007)
 
   const camera = new THREE.PerspectiveCamera(80, window.innerWidth / window.innerHeight, 0.1, 300)
   camera.position.set(0, 1.7, 22)
 
   // ── LIGHTING ──────────────────────────────────────────────────────────────
 
-  // Very low ambient — everything relies on the neon zone lights
-  scene.add(new THREE.AmbientLight(0x06101e, 0.9))
+  // Broad soft ambient — fills every shadow without washing out
+  scene.add(new THREE.AmbientLight(0xfff8f0, 0.9))
 
-  // Hemisphere: cool midnight sky above, warm city-glow orange below
-  scene.add(new THREE.HemisphereLight(0x0a0f20, 0x1a0e06, 0.7))
+  // Sky/ground hemisphere — warm sky, green-grey ground bounce
+  scene.add(new THREE.HemisphereLight(0x9ecce8, 0x5a7a48, 0.9))
 
-  // Cool moonlight — soft, directional, no hard shadows
-  const moon = new THREE.DirectionalLight(0x6677bb, 0.6)
-  moon.position.set(-30, 80, -40)
-  scene.add(moon)
+  // Sun — strong directional, afternoon angle, casts soft shadows
+  const sun = new THREE.DirectionalLight(0xfff5d8, 3.2)
+  sun.position.set(40, 70, 35)
+  sun.castShadow = true
+  sun.shadow.mapSize.set(2048, 2048)
+  sun.shadow.camera.near   = 1
+  sun.shadow.camera.far    = 120
+  sun.shadow.camera.left   = -50
+  sun.shadow.camera.right  =  50
+  sun.shadow.camera.top    =  50
+  sun.shadow.camera.bottom = -50
+  sun.shadow.radius        = 3
+  sun.shadow.bias          = -0.001
+  scene.add(sun)
 
-  // Interior zone lights — vivid neon, plenty of radius to paint the walls
+  // Soft sky-fill from opposite side (blue tint, no shadows)
+  const fill = new THREE.DirectionalLight(0xc8ddf5, 0.6)
+  fill.position.set(-25, 30, -20)
+  scene.add(fill)
+
+  // ── Interior ceiling lights — warm white, one per room ───────────────────
+  // These work alongside the architectural ceiling panels in building.js.
+  // Intensity is high enough to push light into corners realistically.
   const roomLights = [
-    { pos: [-11, 3.6, -14], color: 0xff2288, intensity: 80, radius: 22 },  // Design  — hot pink
-    { pos: [ 11, 3.6, -14], color: 0x2299ff, intensity: 80, radius: 22 },  // Engineering — electric blue
-    { pos: [-11, 3.6,   0], color: 0xff8800, intensity: 70, radius: 20 },  // Ops  — amber
-    { pos: [ 11, 3.6,   0], color: 0x00ffbb, intensity: 70, radius: 20 },  // Fun  — neon mint
-    { pos: [  0, 3.6,   8], color: 0x99aaff, intensity: 55, radius: 24 },  // Lobby — lavender-white
+    { pos: [ -5, 3.8, -14], color: 0xfff0e0, intensity: 25, radius: 18 },  // Design
+    { pos: [  5, 3.8, -14], color: 0xfff0e0, intensity: 25, radius: 18 },  // Engineering
+    { pos: [-11, 3.8,   0], color: 0xfff4e8, intensity: 22, radius: 16 },  // Ops
+    { pos: [ 11, 3.8,   0], color: 0xfff4e8, intensity: 22, radius: 16 },  // Fun
+    { pos: [  0, 3.8,   8], color: 0xfff8f4, intensity: 28, radius: 22 },  // Lobby
   ]
   roomLights.forEach(({ pos, color, intensity, radius }) => {
     const pl = new THREE.PointLight(color, intensity, radius)
     pl.position.set(...pos)
     scene.add(pl)
-    // Low floor-level fill so neon bleeds onto the dark floor
-    const pl2 = new THREE.PointLight(color, intensity * 0.35, radius * 0.45)
-    pl2.position.set(pos[0], 0.3, pos[2])
-    scene.add(pl2)
   })
 
   // ── WORLD GEOMETRY ────────────────────────────────────────────────────────
   onProgress?.(10, 'Laying foundations…')
   buildOutdoors(scene)
-  onProgress?.(25, 'Building structure…')
+  onProgress?.(35, 'Building structure…')
   buildBuilding(scene)
-  onProgress?.(50, 'Installing doors…')
+  onProgress?.(65, 'Installing doors…')
   const doors = buildDoors(scene)
-  onProgress?.(75, 'Lighting the stars…')
-  buildStarfield(scene)
   onProgress?.(90, 'Finishing touches…')
 
   scene.userData.doors = doors
-
-  // ── POST-PROCESSING ───────────────────────────────────────────────────────
-  // UnrealBloom makes the emissive zone strips, ceiling lights and lamp heads
-  // actually glow. Threshold is low enough to catch them without blooming
-  // the dark wall surfaces.
-  const composer = new EffectComposer(renderer)
-  composer.addPass(new RenderPass(scene, camera))
-  const bloom = new UnrealBloomPass(
-    new THREE.Vector2(window.innerWidth, window.innerHeight),
-    0.75,   // strength
-    0.55,   // radius
-    0.28    // threshold — only bright emissive surfaces bloom
-  )
-  composer.addPass(bloom)
 
   // ── RESIZE ────────────────────────────────────────────────────────────────
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight
     camera.updateProjectionMatrix()
     renderer.setSize(window.innerWidth, window.innerHeight)
-    composer.setSize(window.innerWidth, window.innerHeight)
   })
 
   // ── RENDER LOOP ───────────────────────────────────────────────────────────
@@ -98,7 +91,7 @@ export function initScene (onProgress) {
     requestAnimationFrame(animate)
     const delta = clock.getDelta()
     doors.update(delta)
-    composer.render()   // bloom composer replaces direct renderer.render
+    renderer.render(scene, camera)
   }
   animate()
 

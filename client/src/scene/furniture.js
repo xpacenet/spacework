@@ -14,20 +14,20 @@ export function buildFurniture (scene) {
   return { colliders }
 }
 
-// ── Shared material palette — dark premium ────────────────────────────────
+// ── Shared material palette — warm modern office ──────────────────────────
 const MATS = {
-  oak:   () => new THREE.MeshStandardMaterial({ color: 0x2a1a0e, roughness: 0.72, metalness: 0.03 }),
-  white: () => new THREE.MeshStandardMaterial({ color: 0x1a1c22, roughness: 0.65, metalness: 0.05 }),
-  dark:  () => new THREE.MeshStandardMaterial({ color: 0x0a0c10, roughness: 0.55, metalness: 0.15 }),
-  metal: () => new THREE.MeshStandardMaterial({ color: 0x5a6070, roughness: 0.28, metalness: 0.92 }),
-  chair: () => new THREE.MeshStandardMaterial({ color: 0x141830, roughness: 0.78, metalness: 0.06 }),
-  pink:  () => new THREE.MeshStandardMaterial({ color: 0x3a1020, roughness: 0.80, metalness: 0 }),
-  green: () => new THREE.MeshStandardMaterial({ color: 0x0a2218, roughness: 0.78, metalness: 0 }),
-  amber: () => new THREE.MeshStandardMaterial({ color: 0x2a1808, roughness: 0.75, metalness: 0 }),
-  blue:  () => new THREE.MeshStandardMaterial({ color: 0x0a1828, roughness: 0.75, metalness: 0 }),
-  screen:() => new THREE.MeshStandardMaterial({ color: 0x050a14, emissive: 0x0a1830, emissiveIntensity: 1.2, roughness: 0.05 }),
-  bean:  () => new THREE.MeshStandardMaterial({ color: 0x200a18, roughness: 0.92, metalness: 0 }),
-  sofa:  () => new THREE.MeshStandardMaterial({ color: 0x0e1e12, roughness: 0.88, metalness: 0 }),
+  oak:   () => new THREE.MeshStandardMaterial({ color: 0xb07840, roughness: 0.82, metalness: 0 }),
+  white: () => new THREE.MeshStandardMaterial({ color: 0xf0ece4, roughness: 0.72, metalness: 0 }),
+  dark:  () => new THREE.MeshStandardMaterial({ color: 0x2e2820, roughness: 0.62, metalness: 0.08 }),
+  metal: () => new THREE.MeshStandardMaterial({ color: 0x909098, roughness: 0.38, metalness: 0.80 }),
+  chair: () => new THREE.MeshStandardMaterial({ color: 0x2a3a60, roughness: 0.82, metalness: 0 }),
+  pink:  () => new THREE.MeshStandardMaterial({ color: 0xd06080, roughness: 0.72, metalness: 0 }),
+  green: () => new THREE.MeshStandardMaterial({ color: 0x48a870, roughness: 0.72, metalness: 0 }),
+  amber: () => new THREE.MeshStandardMaterial({ color: 0xe89040, roughness: 0.72, metalness: 0 }),
+  blue:  () => new THREE.MeshStandardMaterial({ color: 0x4080c0, roughness: 0.72, metalness: 0 }),
+  screen:() => new THREE.MeshStandardMaterial({ color: 0x101820, emissive: 0x102040, emissiveIntensity: 0.6, roughness: 0.08 }),
+  bean:  () => new THREE.MeshStandardMaterial({ color: 0x9040a0, roughness: 0.92, metalness: 0 }),
+  sofa:  () => new THREE.MeshStandardMaterial({ color: 0x4a7040, roughness: 0.88, metalness: 0 }),
 }
 
 // ── Helper: box mesh + optional collider ──────────────────────────────────

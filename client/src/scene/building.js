@@ -36,54 +36,54 @@ function box (scene, mat, x, y, z, w, h, d) {
 
 // ── Materials ─────────────────────────────────────────────────────────────
 function makeMats () {
-  // Exterior — dark glass-and-steel curtain wall
+  // Exterior — light off-white precast concrete panels, real office building
   const ext = new THREE.MeshStandardMaterial({
-    color: 0x1c2030, roughness: 0.65, metalness: 0.35, side: THREE.DoubleSide,
+    color: 0xd4cfc6, roughness: 0.88, metalness: 0.04, side: THREE.DoubleSide,
   })
-  // Spandrel panels — near-black charcoal
+  // Spandrel bands — medium grey, marks each floor slab
   const span = new THREE.MeshStandardMaterial({
-    color: 0x0e1018, roughness: 0.55, metalness: 0.45,
+    color: 0x7a7872, roughness: 0.78, metalness: 0.08,
   })
-  // Interior walls — deep charcoal (neon zone lights paint them)
+  // Interior walls — warm off-white (real office drywall)
   const int_ = new THREE.MeshStandardMaterial({
-    color: 0x0c0e14, roughness: 0.88, metalness: 0.06,
+    color: 0xf0ece5, roughness: 0.94, metalness: 0,
   })
-  // Interior dividers — slightly lighter so zone lights bleed through
+  // Interior dividers — slightly warmer white
   const div = new THREE.MeshStandardMaterial({
-    color: 0x10121a, roughness: 0.85, metalness: 0.06,
+    color: 0xe8e4dc, roughness: 0.90, metalness: 0,
   })
-  // Lobby floor — very dark mirror-polished concrete (reflects neon)
+  // Lobby floor — large format polished porcelain, light stone
   const tile = new THREE.MeshStandardMaterial({
-    color: 0x0e1020, roughness: 0.04, metalness: 0.52,
+    color: 0xd8d2c8, roughness: 0.18, metalness: 0.07,
   })
-  // Office floors — dark espresso / ebony
+  // Office floors — warm medium oak hardwood
   const wood = new THREE.MeshStandardMaterial({
-    color: 0x120c06, roughness: 0.60, metalness: 0.06,
+    color: 0xb87c48, roughness: 0.82, metalness: 0,
   })
-  // Ceiling — near-black with subtle roughness so light scatters
+  // Ceiling — bright matte white with subtle warmth
   const ceil = new THREE.MeshStandardMaterial({
-    color: 0x080a0f, roughness: 0.92, metalness: 0.04,
+    color: 0xf5f3ee, roughness: 0.98, metalness: 0,
   })
-  // Roof — pitch black
+  // Roof — medium dark grey membrane
   const roof = new THREE.MeshStandardMaterial({
-    color: 0x080a0e, roughness: 0.88, metalness: 0.08,
+    color: 0x424038, roughness: 0.90, metalness: 0,
   })
-  // Aluminium window frames — brushed dark gunmetal
+  // Window frames — satin aluminium
   const frame = new THREE.MeshStandardMaterial({
-    color: 0x202430, roughness: 0.30, metalness: 0.80,
+    color: 0x9a9890, roughness: 0.40, metalness: 0.60,
   })
-  // Glass — dark tinted blue, more reflective at night
+  // Glass — clear low-e tint, blue-grey
   const glass = new THREE.MeshStandardMaterial({
-    color: 0x0a1a30, roughness: 0.02, metalness: 0.25,
-    transparent: true, opacity: 0.60, side: THREE.DoubleSide,
+    color: 0xa8c8d8, roughness: 0.04, metalness: 0.08,
+    transparent: true, opacity: 0.25, side: THREE.DoubleSide,
   })
-  // Stair treads — matte dark concrete
+  // Stair treads — light grey concrete
   const stair = new THREE.MeshStandardMaterial({
-    color: 0x181c22, roughness: 0.85, metalness: 0.06,
+    color: 0x8c8880, roughness: 0.82, metalness: 0.04,
   })
-  // Steel handrail — polished
+  // Steel handrail — brushed satin
   const rail = new THREE.MeshStandardMaterial({
-    color: 0x8899aa, roughness: 0.20, metalness: 0.90,
+    color: 0xb0b0b8, roughness: 0.28, metalness: 0.82,
   })
   return { ext, span, int: int_, div, tile, wood, ceil, roof, frame, glass, stair, rail }
 }
@@ -393,65 +393,57 @@ function _addParapet (scene, mat, W, D, topY) {
   })
 }
 
-// ── Zone accent glowing strips ────────────────────────────────────────────
+// ── Zone floor accent strips — thin inlay lines, no emissive ─────────────
+// In a real office these are colour-coded carpet borders or vinyl strips
+// that help occupants navigate without any sci-fi glow.
 function _addZoneStrips (scene) {
   const strips = [
-    { color: 0xff2288, x: B.minX + 0.08, z1: B.midZ,   z2: B.lobbyZ   },  // Design  — hot pink
-    { color: 0x00ffbb, x: B.maxX - 0.08, z1: B.midZ,   z2: B.lobbyZ   },  // Fun     — neon mint
-    { color: 0xff8800, x: B.minX + 0.08, z1: B.minZ,   z2: B.midZ     },  // Ops     — amber
-    { color: 0x2299ff, x: B.maxX - 0.08, z1: B.minZ,   z2: B.midZ     },  // Eng     — electric blue
-    { color: 0x9988ff, x: 0,             z1: B.lobbyZ, z2: B.maxZ - 1 },  // Lobby   — lavender
+    { color: 0xc44880, x: B.minX + 0.06, z1: B.midZ,   z2: B.lobbyZ   },  // Design — rose
+    { color: 0x40b870, x: B.maxX - 0.06, z1: B.midZ,   z2: B.lobbyZ   },  // Fun    — green
+    { color: 0xe08030, x: B.minX + 0.06, z1: B.minZ,   z2: B.midZ     },  // Ops    — terracotta
+    { color: 0x3888c8, x: B.maxX - 0.06, z1: B.minZ,   z2: B.midZ     },  // Eng    — slate-blue
+    { color: 0x888888, x: 0,             z1: B.lobbyZ, z2: B.maxZ - 1 },  // Lobby  — stone grey
   ]
   strips.forEach(({ color, x, z1, z2 }) => {
     const mat = new THREE.MeshStandardMaterial({
-      color, emissive: color, emissiveIntensity: 5.0, roughness: 0.1,
+      color, roughness: 0.7, metalness: 0,
     })
     const d = z2 - z1
-    // Floor strip — slightly wider so the bloom spreads more
-    const floor = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.08, d), mat)
-    floor.position.set(x, 0.06, (z1 + z2) / 2)
-    scene.add(floor)
-  })
-
-  // ── Vertical neon accent lines on zone divider walls ──────────────────────
-  // Thin glowing rods running floor-to-ceiling beside each door gap.
-  // They mark the zone boundary and look great with bloom.
-  const H = B.wallH
-  const vertAccents = [
-    // Lobby divider (z = lobbyZ)
-    { color: 0xff2288, x: B.leftDoorX  - B.doorHalfW - 0.15, z: B.lobbyZ, side: 'left'  },
-    { color: 0xff2288, x: B.leftDoorX  + B.doorHalfW + 0.15, z: B.lobbyZ, side: 'right' },
-    { color: 0x00ffbb, x: B.rightDoorX - B.doorHalfW - 0.15, z: B.lobbyZ, side: 'left'  },
-    { color: 0x00ffbb, x: B.rightDoorX + B.doorHalfW + 0.15, z: B.lobbyZ, side: 'right' },
-    // Mid divider (z = midZ)
-    { color: 0xff8800, x: B.leftDoorX  - B.doorHalfW - 0.15, z: B.midZ, side: 'left'  },
-    { color: 0xff8800, x: B.leftDoorX  + B.doorHalfW + 0.15, z: B.midZ, side: 'right' },
-    { color: 0x2299ff, x: B.rightDoorX - B.doorHalfW - 0.15, z: B.midZ, side: 'left'  },
-    { color: 0x2299ff, x: B.rightDoorX + B.doorHalfW + 0.15, z: B.midZ, side: 'right' },
-  ]
-  vertAccents.forEach(({ color, x, z }) => {
-    const mat = new THREE.MeshStandardMaterial({
-      color, emissive: color, emissiveIntensity: 4.0, roughness: 0.1,
-    })
-    const rod = new THREE.Mesh(new THREE.BoxGeometry(0.06, H, 0.06), mat)
-    rod.position.set(x, H / 2, z)
-    scene.add(rod)
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, d), mat)
+    m.position.set(x, 0.05, (z1 + z2) / 2)
+    scene.add(m)
   })
 }
 
-// ── Ceiling light housings ─────────────────────────────────────────────────
+// ── Ceiling light panels — 2×1 recessed troffer fixtures ─────────────────
+// Real offices use fluorescent or LED panels set flush into a drop ceiling.
+// The housing is a slightly-inset box; the diffuser is an emissive white panel.
 function _addCeilingLights (scene, H) {
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0xffffff, emissive: 0xffeedd, emissiveIntensity: 4.0, roughness: 0.3,
+  const housingMat = new THREE.MeshStandardMaterial({
+    color: 0xd8d5ce, roughness: 0.85, metalness: 0.06,
   })
-  ;[
-    [0, 8], [-10, 8], [10, 8],
+  const diffuserMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff, emissive: 0xfff5e8, emissiveIntensity: 1.2, roughness: 0.7,
+  })
+
+  // (x, z) — one row per zone plus double set in lobby
+  const fixtures = [
+    // Lobby — two rows
+    [-8, 8], [8, 8], [0, 8],
+    // Ops / Fun
     [-11, 0], [11, 0],
-    [-11, -14], [11, -14],
-  ].forEach(([x, z]) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.04, 1.2), mat)
-    m.position.set(x, H - 0.03, z)
-    scene.add(m)
+    // Design / Engineering (two per room)
+    [-14, -10], [-8, -18], [8, -18], [14, -10],
+  ]
+  fixtures.forEach(([x, z]) => {
+    // Metal housing (recessed, sits at ceiling)
+    const housing = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.06, 0.65), housingMat)
+    housing.position.set(x, H - 0.04, z)
+    scene.add(housing)
+    // Bright diffuser (flush with ceiling face)
+    const diff = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.01, 0.55), diffuserMat)
+    diff.position.set(x, H - 0.02, z)
+    scene.add(diff)
   })
 }
 
