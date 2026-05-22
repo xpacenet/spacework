@@ -11,6 +11,11 @@ const CAM_HEIGHT = 2.6
 const CAM_LAG    = 14   // higher = snappier follow
 const EYE_HEIGHT = 1.65  // 1st-person eye height
 
+// 3rd-person FOV breathing
+const FOV_DEFAULT = 60   // idle
+const FOV_MOVE    = 64   // walking — subtle widening gives sense of speed
+const FOV_TIGHT   = 57   // tight space (spring arm compressed) — narrowing = claustrophobic feel
+
 export function setupControls (avatar, camera, domElement) {
   const keys = {}
   let yaw        = Math.PI      // faces building at spawn
@@ -24,6 +29,10 @@ export function setupControls (avatar, camera, domElement) {
   let camPitch   = 0.28   // 3rd-person vertical arm angle (rad). 0 = level, π/2 = top-down
                            // default ~16° gives a comfortable over-the-shoulder view
   let camDist    = CAM_DIST_DEFAULT  // 3rd-person arm length, adjusted by scroll wheel
+
+  // ── 3rd-person camera feel ────────────────────────────────────────────────
+  let _bobClock = 0     // walk-frequency clock shared with leg animation (12 rad/s)
+  let _bobAmt   = 0     // 0 = still, 1 = full bob — lerps smoothly between states
 
   // ── Overview free-camera pan / zoom ───────────────────────────────────────
   let _ovCamX    = 0      // world-space look-at position for overview
@@ -83,18 +92,18 @@ export function setupControls (avatar, camera, domElement) {
     }
   })
   domElement.addEventListener('mousedown', e => {
-    // Right-click owns camera orbit in 3rd-person and pan in overview.
-    // Left-click is reserved for click-to-navigate — no conflict.
-    if (e.button !== 2) return
+    // Left-click drag = orbit (3rd-person) / pan (overview).
+    // Left-click tap = navigate (distinguished by _dragMoved staying false).
+    if (e.button !== 0) return
     _dragging = true; _dragMoved = false
     if (mode === 'overview') domElement.style.cursor = 'grabbing'
   })
   document.addEventListener('mouseup', e => {
-    if (e.button !== 2) return
+    if (e.button !== 0) return
     _dragging = false
     if (mode === 'overview') domElement.style.cursor = 'grab'
   })
-  // Suppress the browser context menu so right-click drag doesn't pop it up
+  // Suppress context menu — keeps right-click from interrupting interaction
   domElement.addEventListener('contextmenu', e => e.preventDefault())
 
   // ── Scroll-to-zoom (overview: camera height / 3rd-person: arm length) ────
@@ -140,6 +149,8 @@ export function setupControls (avatar, camera, domElement) {
     const marker  = document.getElementById('overview-marker')
     if (marker && mode !== 'overview') marker.style.display = 'none'
     if (mode === 'third' || mode === 'overview') document.exitPointerLock?.()
+    // Reset FOV when leaving 3rd-person so other modes aren't affected
+    if (m !== 'third') { camera.fov = FOV_DEFAULT; camera.updateProjectionMatrix() }
     // Show grab cursor in overview; flat mode manages its own canvas cursor
     domElement.style.cursor = mode === 'overview' ? 'grab' : 'pointer'
     // Flat mode covers the 3-D canvas — hide it so it doesn't bleed through
@@ -270,10 +281,20 @@ export function setupControls (avatar, camera, domElement) {
       // Spring arm: shorten when a wall sits between avatar and ideal camera position.
       // This prevents the "see through wall" effect — camera pulls in instead of clipping.
       const arm    = _springArm(avatar.position.x, avatar.position.z, yaw, camDist)
+      const isTight = arm < camDist * 0.85   // true when noticeably compressed by a wall
       const pivotY = avatar.position.y + 1.2
+
+      // ── Camera bob ────────────────────────────────────────────────────────
+      // Walks at 12 rad/s (same clock as leg animation). _bobAmt smoothly
+      // ramps 0→1 when moving and back to 0 when stopped so there's no
+      // jarring pop. Amplitude is subtle (±3.5 cm) — felt but not seen.
+      _bobClock += delta * 12
+      _bobAmt   += ((isMoving ? 1 : 0) - _bobAmt) * Math.min(1, 8 * delta)
+      const bob = Math.sin(_bobClock) * 0.035 * _bobAmt
+
       _camT.set(
         avatar.position.x - Math.sin(yaw) * Math.cos(camPitch) * arm,
-        pivotY            + Math.sin(camPitch) * arm,
+        pivotY            + Math.sin(camPitch) * arm + bob,
         avatar.position.z - Math.cos(yaw) * Math.cos(camPitch) * arm
       )
       // Snap immediately when arm is shortened by collision (no lerp through wall),
@@ -284,6 +305,13 @@ export function setupControls (avatar, camera, domElement) {
         camera.position.lerp(_camT, 1 - Math.exp(-CAM_LAG * delta))
       }
       camera.lookAt(avatar.position.x, pivotY, avatar.position.z)
+
+      // ── FOV breathe ───────────────────────────────────────────────────────
+      // Tight space takes priority over movement: narrowing FOV makes corridors
+      // feel physically close. Walking widens FOV slightly for sense of momentum.
+      const fovTarget = isTight ? FOV_TIGHT : (isMoving ? FOV_MOVE : FOV_DEFAULT)
+      camera.fov += (fovTarget - camera.fov) * Math.min(1, 6 * delta)
+      camera.updateProjectionMatrix()
 
     } else {
       // ── 1st-person (FPS) ──────────────────────────────────────────────────
