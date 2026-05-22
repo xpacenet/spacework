@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { AVATAR_PRESETS }    from './player/avatar.js'
 import { initScene }         from './scene/index.js'
 import { buildScreens }      from './scene/screens.js'
 import { initPlayer }        from './player/index.js'
@@ -48,6 +49,42 @@ const loadText     = document.getElementById('load-text')
 const hud          = document.getElementById('hud')
 const clickToStart = document.getElementById('click-to-start')
 const enterBtn     = document.getElementById('enter-btn')
+
+// ── Lobby avatar grid ──────────────────────────────────────────────────────
+;(function initLobbyAvatars () {
+  const grid = document.getElementById('lobby-avatar-grid')
+  if (!grid) return
+  const saved = parseInt(localStorage.getItem('spaceAvatarId') ?? '0', 10)
+  const hex = n => '#' + n.toString(16).padStart(6, '0')
+  AVATAR_PRESETS.forEach(p => {
+    const s = hex(p.skin), h = hex(p.hair), o = hex(p.outfit), a = hex(p.accent)
+    const chip = document.createElement('div')
+    chip.className = 'lav-chip' + (p.id === saved ? ' lav-active' : '')
+    chip.dataset.id = String(p.id)
+    chip.title = p.label
+    chip.innerHTML = `<svg viewBox="0 0 60 82" xmlns="http://www.w3.org/2000/svg">
+      <ellipse cx="30" cy="16" rx="17" ry="14" fill="${h}"/>
+      <circle cx="30" cy="22" r="13" fill="${s}"/>
+      <ellipse cx="17.5" cy="22" rx="3.5" ry="4.5" fill="${s}"/>
+      <ellipse cx="42.5" cy="22" rx="3.5" ry="4.5" fill="${s}"/>
+      <circle cx="25" cy="21" r="2.8" fill="${a}"/><circle cx="35" cy="21" r="2.8" fill="${a}"/>
+      <circle cx="25" cy="21" r="1.6" fill="#111"/><circle cx="35" cy="21" r="1.6" fill="#111"/>
+      <rect x="26.5" y="34" width="7" height="5" rx="2" fill="${s}"/>
+      <rect x="14" y="39" width="32" height="24" rx="6" fill="${o}"/>
+      <rect x="22" y="44" width="16" height="5" rx="2" fill="${a}" opacity="0.75"/>
+      <rect x="5" y="40" width="10" height="20" rx="5" fill="${o}"/>
+      <rect x="45" y="40" width="10" height="20" rx="5" fill="${o}"/>
+      <rect x="16" y="62" width="11" height="14" rx="4" fill="${o}"/>
+      <rect x="33" y="62" width="11" height="14" rx="4" fill="${o}"/>
+    </svg>`
+    chip.addEventListener('click', () => {
+      grid.querySelectorAll('.lav-chip').forEach(c => c.classList.remove('lav-active'))
+      chip.classList.add('lav-active')
+      localStorage.setItem('spaceAvatarId', String(p.id))
+    })
+    grid.appendChild(chip)
+  })
+})()
 
 // ── Connection mode tabs ───────────────────────────────────────────────────
 let connectMode = 'p2p'

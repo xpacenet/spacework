@@ -1,10 +1,11 @@
 import * as THREE from 'three'
-import { setupControls }                   from './controls.js'
-import { createLocalAvatar, animateWalk }  from './avatar.js'
-import { getZone, setFurnitureColliders } from './collision.js'
-import { BLDG as B }                       from '../scene/building.js'
-import { buildFurniture }                  from '../scene/furniture.js'
-import { FlatMap }                         from '../ui/flatMap.js'
+import { setupControls }                              from './controls.js'
+import { createLocalAvatar, animateWalk, applyPreset } from './avatar.js'
+import { getZone, setFurnitureColliders }             from './collision.js'
+import { BLDG as B }                                  from '../scene/building.js'
+import { buildFurniture }                             from '../scene/furniture.js'
+import { FlatMap }                                    from '../ui/flatMap.js'
+import { AvatarPicker }                               from '../ui/avatarPicker.js'
 
 // ── Zone visual config ────────────────────────────────────────────────────
 const ZONES = [
@@ -26,10 +27,16 @@ const MAP = {
 let mapCanvas, mapCtx
 
 export function initPlayer (scene, camera, renderer, onZoneChange) {
-  const username  = window._spaceUsername || 'You'
-  const avatar    = createLocalAvatar(username)
+  const username   = window._spaceUsername || 'You'
+  const savedPreset = parseInt(localStorage.getItem('spaceAvatarId') ?? '0', 10)
+  const avatar     = createLocalAvatar(username, savedPreset)
   avatar.position.set(0, 0, 22)   // spawn outside, facing building
   scene.add(avatar)
+
+  // ── Avatar picker ─────────────────────────────────────────────────────────
+  const picker = new AvatarPicker((id) => applyPreset(avatar, username, id))
+  const avatarBtn = document.getElementById('avatar-btn')
+  if (avatarBtn) avatarBtn.addEventListener('click', () => picker.show())
 
   // Build furniture colliders and register them
   const { colliders: furnitureCols } = buildFurniture(scene)
