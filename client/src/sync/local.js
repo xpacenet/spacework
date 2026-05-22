@@ -21,6 +21,7 @@ export class LocalSync {
   #id       = Math.random().toString(36).slice(2, 9)
   #username = ''
   #presetId = 0
+  #status   = 'available'
   #pos      = { x: 0, y: 0, z: 0, ry: 0 }
   #ch       = null    // BroadcastChannel — MOVE + AVATAR
   #known    = new Map()  // peerId → { username, presetId }
@@ -28,9 +29,10 @@ export class LocalSync {
   #hb       = null
   #scan     = null
 
-  constructor(username, presetId = 0) {
+  constructor(username, presetId = 0, status = 'available') {
     this.#username = username || ''
     this.#presetId = presetId
+    this.#status   = status
   }
 
   get id() { return this.#id }
@@ -47,6 +49,7 @@ export class LocalSync {
       if (data.type === 'COMMIT') this.#fire('COMMIT', data)
       if (data.type === 'CHAT')   this.#fire('CHAT',   data)
       if (data.type === 'AVATAR') this.#fire('AVATAR', data)
+      if (data.type === 'STATUS') this.#fire('STATUS', data)
     }
   }
 
@@ -73,8 +76,14 @@ export class LocalSync {
 
   avatar(presetId) {
     this.#presetId = presetId
-    this.#write()   // update localStorage so newly-joining tabs see the new preset
+    this.#write()
     this.#ch?.postMessage({ type: 'AVATAR', from: this.#id, presetId })
+  }
+
+  status(status) {
+    this.#status = status
+    this.#write()   // update localStorage so joining tabs see current status
+    this.#ch?.postMessage({ type: 'STATUS', from: this.#id, status })
   }
 
   on(type, cb) {
@@ -89,7 +98,7 @@ export class LocalSync {
     try {
       localStorage.setItem(PREFIX + this.#id, JSON.stringify({
         id: this.#id, username: this.#username, presetId: this.#presetId,
-        ...this.#pos, ts: Date.now(),
+        status: this.#status, ...this.#pos, ts: Date.now(),
       }))
     } catch {}
   }
@@ -118,8 +127,8 @@ export class LocalSync {
       alive.add(peerId)
 
       if (!this.#known.has(peerId)) {
-        this.#known.set(peerId, { username: data.username, presetId: data.presetId ?? 0 })
-        this.#fire('PEER', { from: peerId, username: data.username, presetId: data.presetId ?? 0 })
+        this.#known.set(peerId, { username: data.username, presetId: data.presetId ?? 0, status: data.status ?? 'available' })
+        this.#fire('PEER', { from: peerId, username: data.username, presetId: data.presetId ?? 0, status: data.status ?? 'available' })
       }
     }
 

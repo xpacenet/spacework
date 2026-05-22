@@ -12,12 +12,31 @@ export const AVATAR_PRESETS = [
   { id: 5, label: 'Sam',    skin: 0xFDE8D8, hair: 0xB45309, outfit: 0x4C1D95, accent: 0xEDE9FE, hairStyle: 1 },
 ]
 
+// ── Status config ─────────────────────────────────────────────────────────────
+export const STATUS_OPTIONS = [
+  { id: 'available', label: '🟢 Available', color: 0x00e676 },
+  { id: 'busy',      label: '🔴 Busy',      color: 0xff4444 },
+  { id: 'away',      label: '🟡 Away',      color: 0xffcc00 },
+  { id: 'meeting',   label: '🟣 In Meeting',color: 0xaa44ff },
+]
+const STATUS_COLORS = Object.fromEntries(STATUS_OPTIONS.map(s => [s.id, s.color]))
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function createLocalAvatar (username, presetId = 0) {
   const group = new THREE.Group()
   _populate(group, username, presetId)
   return group
+}
+
+/**
+ * Update the floating status dot colour on any avatar.
+ * Safe to call any time — no-op if the mesh isn't built yet.
+ */
+export function setAvatarStatus (avatarGroup, status) {
+  avatarGroup.userData.status = status
+  const mesh = avatarGroup.userData.statusMesh
+  if (mesh) mesh.material.color.setHex(STATUS_COLORS[status] ?? STATUS_COLORS.available)
 }
 
 /** Swap preset in-place — safe because controls.js holds the group reference. */
@@ -119,6 +138,16 @@ function _populate (group, username, presetId) {
   sprite.position.set(0, 2.18, 0)
   sprite.scale.set(1.5, 0.33, 1)
   group.add(sprite)
+
+  // ── Status dot — small glowing sphere, top-right of nametag ─────────────
+  const statusColor = STATUS_COLORS[group.userData.status ?? 'available']
+  const statusMesh  = new THREE.Mesh(
+    new THREE.SphereGeometry(0.065, 8, 6),
+    new THREE.MeshBasicMaterial({ color: statusColor })
+  )
+  statusMesh.position.set(0.58, 2.22, 0)
+  group.add(statusMesh)
+  group.userData.statusMesh = statusMesh
 
   // Walk animation refs — preserve walkClock across preset swaps
   group.userData.legL      = legL

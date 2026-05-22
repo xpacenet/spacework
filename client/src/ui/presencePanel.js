@@ -7,8 +7,12 @@
  * Zone colours mirror the minimap palette so the UI feels consistent.
  */
 
-import { AVATAR_PRESETS }  from '../player/avatar.js'
-import { getZone }         from '../player/collision.js'
+import { AVATAR_PRESETS, STATUS_OPTIONS } from '../player/avatar.js'
+import { getZone }                        from '../player/collision.js'
+
+const STATUS_COLOR_MAP = Object.fromEntries(STATUS_OPTIONS.map(s => [
+  s.id, '#' + s.color.toString(16).padStart(6, '0')
+]))
 
 const ZONE_COLOR = {
   OUTSIDE:     '#88cc66',
@@ -42,13 +46,18 @@ export class PresencePanel {
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
-  setSelf (username, presetId, zone) {
-    this._self = { username, presetId, zone: zone || 'OUTSIDE' }
+  setSelf (username, presetId, zone, status = 'available') {
+    this._self = { username, presetId, zone: zone || 'OUTSIDE', status }
     this._render()
   }
 
-  addPeer (peerId, username, presetId = 0) {
-    this._peers.set(peerId, { username, presetId, x: 0, z: 0, zone: 'OUTSIDE' })
+  updateSelfStatus (status) {
+    this._self.status = status
+    this._render()
+  }
+
+  addPeer (peerId, username, presetId = 0, status = 'available') {
+    this._peers.set(peerId, { username, presetId, x: 0, z: 0, zone: 'OUTSIDE', status })
     this._render()
   }
 
@@ -64,6 +73,13 @@ export class PresencePanel {
     const p = this._peers.get(peerId)
     if (!p) return
     p.presetId = presetId
+    this._render()
+  }
+
+  updatePeerStatus (peerId, status) {
+    const p = this._peers.get(peerId)
+    if (!p) return
+    p.status = status
     this._render()
   }
 
@@ -107,6 +123,7 @@ export class PresencePanel {
       username:  this._self.username || 'You',
       presetId:  this._self.presetId,
       zone:      this._self.zone,
+      status:    this._self.status,
       isSelf:    true,
     }))
 
@@ -122,6 +139,7 @@ export class PresencePanel {
         username: p.username,
         presetId: p.presetId,
         zone:     p.zone,
+        status:   p.status,
         isSelf:   false,
         onClick:  () => this._onNavigate?.({ x: p.x, z: p.z }),
       }))
@@ -137,16 +155,18 @@ export class PresencePanel {
     })
   }
 
-  _row ({ username, presetId, zone, isSelf, onClick }) {
-    const preset    = AVATAR_PRESETS[presetId] ?? AVATAR_PRESETS[0]
-    const dotColor  = '#' + preset.outfit.toString(16).padStart(6, '0')
-    const zoneColor = ZONE_COLOR[zone] ?? '#888'
-    const zoneLabel = ZONE_LABEL[zone] ?? zone
+  _row ({ username, presetId, zone, status = 'available', isSelf, onClick }) {
+    const preset      = AVATAR_PRESETS[presetId] ?? AVATAR_PRESETS[0]
+    const avatarColor = '#' + preset.outfit.toString(16).padStart(6, '0')
+    const statusColor = STATUS_COLOR_MAP[status] ?? STATUS_COLOR_MAP.available
+    const zoneColor   = ZONE_COLOR[zone]  ?? '#888'
+    const zoneLabel   = ZONE_LABEL[zone]  ?? zone
 
     return `
       <div class="pp-row ${isSelf ? 'pp-self' : 'pp-peer'}"
            ${!isSelf ? `data-idx="${username}"` : ''}>
-        <span class="pp-dot" style="background:${dotColor}"></span>
+        <span class="pp-dot" style="background:${avatarColor}"></span>
+        <span class="pp-status-dot" style="background:${statusColor}" title="${status}"></span>
         <span class="pp-name">${_esc(username)}${isSelf ? ' <span class="pp-you">(you)</span>' : ''}</span>
         <span class="pp-zone" style="color:${zoneColor}">${zoneLabel}</span>
         ${!isSelf ? '<span class="pp-go" title="Walk to this person">→</span>' : ''}

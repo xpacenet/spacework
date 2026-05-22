@@ -23,6 +23,7 @@ export class RemoteSync {
   #room     = null
   #username = null
   #presetId = 0
+  #status   = 'available'
   #handlers = {}
 
   #sendIntro  = null; #onIntro  = null
@@ -30,10 +31,12 @@ export class RemoteSync {
   #sendChat   = null; #onChat   = null
   #sendBye    = null; #onBye    = null
   #sendAvatar = null; #onAvatar = null
+  #sendStatus = null; #onStatus = null
 
-  constructor(username, presetId = 0) {
+  constructor(username, presetId = 0, status = 'available') {
     this.#username = username
     this.#presetId = presetId
+    this.#status   = status
   }
 
   async start() {
@@ -44,10 +47,11 @@ export class RemoteSync {
     ;[this.#sendChat,   this.#onChat]   = this.#room.makeAction('chat')
     ;[this.#sendBye,    this.#onBye]    = this.#room.makeAction('bye')
     ;[this.#sendAvatar, this.#onAvatar] = this.#room.makeAction('avatar')
+    ;[this.#sendStatus, this.#onStatus] = this.#room.makeAction('status')
 
-    // New peer appears — send our intro (username + current preset) so they know us
+    // New peer appears — send our intro (username + current preset + status)
     this.#room.onPeerJoin(peerId => {
-      this.#sendIntro({ username: this.#username, presetId: this.#presetId }, peerId)
+      this.#sendIntro({ username: this.#username, presetId: this.#presetId, status: this.#status }, peerId)
     })
 
     // Peer disconnects
@@ -55,15 +59,20 @@ export class RemoteSync {
       this.#fire('PEER_LEAVE', { from: peerId })
     })
 
-    // Receive intro — announce peer (with preset) and reply so they know us
-    this.#onIntro(({ username, presetId = 0 }, peerId) => {
-      this.#fire('HELLO', { from: peerId, username, presetId })
-      this.#sendIntro({ username: this.#username, presetId: this.#presetId }, peerId)
+    // Receive intro — announce peer and reply
+    this.#onIntro(({ username, presetId = 0, status = 'available' }, peerId) => {
+      this.#fire('HELLO', { from: peerId, username, presetId, status })
+      this.#sendIntro({ username: this.#username, presetId: this.#presetId, status: this.#status }, peerId)
     })
 
     // Receive avatar change mid-session
     this.#onAvatar(({ presetId }, peerId) => {
       this.#fire('AVATAR_CHANGE', { from: peerId, presetId })
+    })
+
+    // Receive status change mid-session
+    this.#onStatus(({ status }, peerId) => {
+      this.#fire('STATUS_CHANGE', { from: peerId, status })
     })
 
     this.#onMove(({ pos }, peerId) => {
@@ -110,6 +119,11 @@ export class RemoteSync {
   setAvatar(presetId) {
     this.#presetId = presetId
     this.#sendAvatar?.({ presetId })
+  }
+
+  setStatus(status) {
+    this.#status = status
+    this.#sendStatus?.({ status })
   }
 
   on(type, cb) {

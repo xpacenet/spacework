@@ -26,26 +26,31 @@ export class SpaceSync extends EventTarget {
   #started  = false
   #username = ''
   #presetId = 0
+  #status   = 'available'
 
   get peers()     { return [...this.#peers.values()] }
   get peerCount() { return this.#peers.size }
   get id()        { return selfId }
 
-  async start(username, presetId = 0) {
+  async start(username, presetId = 0, status = 'available') {
     if (this.#started) return
     this.#started  = true
     this.#username = username
     this.#presetId = presetId
+    this.#status   = status
 
     // ── Tier 1: same-browser tabs via BroadcastChannel ────────────────────
-    this.#local = new LocalSync(username, presetId)
+    this.#local = new LocalSync(username, presetId, status)
 
-    this.#local.on('PEER',   ({ from, username: u, presetId: pid = 0 }) => {
+    this.#local.on('PEER',   ({ from, username: u, presetId: pid = 0, status: st = 'available' }) => {
       if (this.#peers.has(from)) return
-      this.#addPeer(from, u, 'local', pid)
+      this.#addPeer(from, u, 'local', pid, st)
     })
     this.#local.on('AVATAR', ({ from, presetId: pid }) => {
       this.#emit('peer:avatar', { peerId: from, presetId: pid })
+    })
+    this.#local.on('STATUS', ({ from, status: st }) => {
+      this.#emit('peer:status', { peerId: from, status: st })
     })
     this.#local.on('BYE',    ({ from })         => this.#removePeer(from))
     this.#local.on('MOVE',   ({ from, pos })    => this.#emit('peer:move', { peerId: from, pos }))
@@ -57,14 +62,17 @@ export class SpaceSync extends EventTarget {
     this.#local.start()
 
     // ── Tier 2: cross-machine via Trystero WebRTC ─────────────────────────
-    this.#remote = new RemoteSync(username, presetId)
+    this.#remote = new RemoteSync(username, presetId, status)
 
-    this.#remote.on('HELLO', ({ from, username: u, presetId: pid = 0 }) => {
+    this.#remote.on('HELLO', ({ from, username: u, presetId: pid = 0, status: st = 'available' }) => {
       if (this.#peers.has(from)) return
-      this.#addPeer(from, u, 'remote', pid)
+      this.#addPeer(from, u, 'remote', pid, st)
     })
     this.#remote.on('AVATAR_CHANGE', ({ from, presetId: pid }) => {
       this.#emit('peer:avatar', { peerId: from, presetId: pid })
+    })
+    this.#remote.on('STATUS_CHANGE', ({ from, status: st }) => {
+      this.#emit('peer:status', { peerId: from, status: st })
     })
     this.#remote.on('PEER_LEAVE', ({ from }) => this.#removePeer(from))
     this.#remote.on('MOVE', ({ from, pos }) => {
@@ -100,6 +108,13 @@ export class SpaceSync extends EventTarget {
     this.#remote?.setAvatar(presetId)
   }
 
+  /** Broadcast a new status to all peers. */
+  setStatus(status) {
+    this.#status = status
+    this.#local?.status(status)
+    this.#remote?.setStatus(status)
+  }
+
   // ── Proximity voice ────────────────────────────────────────────────────────
   /** Broadcast a local audio track to all remote peers (WebRTC only — no BroadcastChannel). */
   addVoiceTrack (track, stream) { this.#remote?.addVoiceTrack(track, stream) }
@@ -121,9 +136,9 @@ export class SpaceSync extends EventTarget {
 
   // ── internal ───────────────────────────────────────────────────────────────
 
-  #addPeer(peerId, username, source, presetId = 0) {
-    this.#peers.set(peerId, { peerId, username, source, presetId })
-    this.#emit('peer:join',  { peerId, username, source, presetId })
+  #addPeer(peerId, username, source, presetId = 0, status = 'available') {
+    this.#peers.set(peerId, { peerId, username, source, presetId, status })
+    this.#emit('peer:join',  { peerId, username, source, presetId, status })
     this.#emit('status',     { peerCount: this.#peers.size })
   }
 

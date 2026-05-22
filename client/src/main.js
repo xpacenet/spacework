@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { AVATAR_PRESETS, createLocalAvatar, animateWalk } from './player/avatar.js'
+import { AVATAR_PRESETS, createLocalAvatar, animateWalk, setAvatarStatus, STATUS_OPTIONS } from './player/avatar.js'
 import { initScene }         from './scene/index.js'
 import { buildScreens }      from './scene/screens.js'
 import { initPlayer }        from './player/index.js'
@@ -156,18 +156,50 @@ function startBoarding() {
 
     // ── Player ────────────────────────────────────────────────────────────
     // ── Presence panel ────────────────────────────────────────────────────
+    const _localPreset = parseInt(localStorage.getItem('spaceAvatarId') ?? '0', 10)
     const presence = new PresencePanel((dest) => player?.navigate(dest))
     const ppEl     = document.getElementById('presence-panel')
     if (ppEl) ppEl.classList.add('pp-visible')
-    presence.setSelf(username, _localPreset, 'OUTSIDE')
+    presence.setSelf(username, _localPreset, 'OUTSIDE', 'available')
 
     const player = initPlayer(scene, camera, renderer,
       (zone) => { updateZoneUI(zone); presence.updateSelfZone(zone) },
       (presetId) => {
         spaceSync.setAvatar(presetId)
-        presence.setSelf(username, presetId, presence._self.zone)
+        presence.setSelf(username, presetId, presence._self.zone, _selfStatus)
       }
     )
+
+    // ── Status selector ───────────────────────────────────────────────────
+    let _selfStatus = 'available'
+    const statusBtn  = document.getElementById('status-btn')
+    const statusMenu = document.getElementById('status-menu')
+    if (statusBtn && statusMenu) {
+      STATUS_OPTIONS.forEach(opt => {
+        const color = '#' + opt.color.toString(16).padStart(6, '0')
+        const item  = document.createElement('div')
+        item.className   = 'sm-opt' + (opt.id === _selfStatus ? ' sm-active' : '')
+        item.dataset.status = opt.id
+        item.innerHTML = `<span class="sm-dot" style="background:${color};box-shadow:0 0 4px ${color}40"></span>${opt.label}`
+        item.addEventListener('click', e => {
+          e.stopPropagation()
+          _selfStatus = opt.id
+          statusBtn.innerHTML = `<span class="sm-dot" style="background:${color};box-shadow:0 0 4px ${color}40;display:inline-block;vertical-align:middle;width:8px;height:8px;border-radius:50%;margin-right:5px"></span>${opt.label.replace(/^\S+\s/, '')}`
+          player.setStatus(opt.id)
+          presence.updateSelfStatus(opt.id)
+          spaceSync.setStatus(opt.id)
+          statusMenu.querySelectorAll('.sm-opt').forEach(el =>
+            el.classList.toggle('sm-active', el.dataset.status === opt.id))
+          statusMenu.classList.remove('sm-open')
+        })
+        statusMenu.appendChild(item)
+      })
+      statusBtn.addEventListener('click', e => {
+        e.stopPropagation()
+        statusMenu.classList.toggle('sm-open')
+      })
+      document.addEventListener('click', () => statusMenu.classList.remove('sm-open'))
+    }
 
     // ── View toggle pill (2D / 3rd / 1st) ────────────────────────────────
     document.querySelectorAll('.vtbtn').forEach(btn => {
@@ -308,6 +340,14 @@ function startBoarding() {
       presence.updatePeerPreset(peerId, presetId)
     })
 
+    // Status change broadcast from a remote peer
+    spaceSync.addEventListener('peer:status', e => {
+      const { peerId, status } = e.detail
+      const av = _avatars.get(peerId)
+      if (av) setAvatarStatus(av, status)
+      presence.updatePeerStatus(peerId, status)
+    })
+
     // ── Peer avatar animation loop ─────────────────────────────────────────
     // Runs independently of the player tick so peer walk animation stays
     // smooth even when the local player is idle.
@@ -320,9 +360,8 @@ function startBoarding() {
       _avatars.forEach(av => animateWalk(av, av.userData.isMoving ?? false, delta))
     })()
 
-    // Start sync — include saved preset so peers know our avatar from the first handshake
-    const _localPreset = parseInt(localStorage.getItem('spaceAvatarId') ?? '0', 10)
-    spaceSync.start(username, _localPreset)
+    // Start sync — include saved preset + status so peers know both from the first handshake
+    spaceSync.start(username, _localPreset, _selfStatus)
     window._sync = spaceSync
 
     // ── Proximity voice ────────────────────────────────────────────────────
