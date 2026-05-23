@@ -12,7 +12,7 @@
     "test:e2e": "echo 'E2E removed — run Playwright locally if needed'"
   },
   "dependencies": {
-    "@trystero-p2p/nostr": "^0.24.0",
+    "@trystero-p2p/torrent": "^0.24.0",
     "three": "^0.165.0"
   },
   "devDependencies": {

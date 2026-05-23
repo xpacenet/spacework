@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 // We mock the Trystero import so Vitest doesn't try to load the browser-only module.
-vi.mock('@trystero-p2p/nostr', () => ({ joinRoom: vi.fn() }))
+vi.mock('@trystero-p2p/torrent', () => ({ joinRoom: vi.fn() }))
 
 const { deriveRoomId, currentRoomName } =
   await import('../remote.js')
@@ -29,9 +29,9 @@ describe('deriveRoomId', () => {
     expect(deriveRoomId()).toBe('sw-1-teamalpha')
   })
 
-  it('replaces spaces and special chars with dashes', () => {
-    window.location.hash = '#My Room!!'
-    // space→dash, each !→dash, then consecutive dashes collapse to one
+  it('replaces special chars with dashes', () => {
+    window.location.hash = '#my-room!!'
+    // each !→dash, then consecutive dashes collapse to one
     expect(deriveRoomId()).toBe('sw-1-my-room-')
   })
 

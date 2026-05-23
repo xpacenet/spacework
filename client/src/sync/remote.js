@@ -21,7 +21,7 @@
  *   bye    — explicit disconnect signal
  */
 
-import { joinRoom } from '@trystero-p2p/nostr'
+import { joinRoom } from '@trystero-p2p/torrent'
 import { getIdentity } from '../identity/index.js'
 
 const APP_ID = 'spacework-v1'
@@ -32,8 +32,8 @@ const APP_ID = 'spacework-v1'
  * Exposed so the lobby can show the current room name.
  */
 export function deriveRoomId () {
-  const decoded = decodeURIComponent(window.location.hash.slice(1)).trim().toLowerCase()
-  const slug = decoded.replace(/[^a-z0-9-]/g, '-').replace(/-{2,}/g, '-').slice(0, 40) || 'main'
+  const raw  = window.location.hash.slice(1).trim().toLowerCase()
+  const slug = raw.replace(/[^a-z0-9-]/g, '-').replace(/-{2,}/g, '-').slice(0, 40) || 'main'
   return `sw-1-${slug}`
 }
 
@@ -72,7 +72,6 @@ export class RemoteSync {
 
   async start () {
     const roomId = deriveRoomId()
-    console.log(`[SpaceWork] joining P2P room: ${roomId}`)
     this.#room = joinRoom({ appId: APP_ID }, roomId)
 
     ;[this.#sendIntro,  this.#onIntro]  = this.#room.makeAction('intro')
@@ -84,7 +83,6 @@ export class RemoteSync {
 
     // ── Peer arrives — exchange intros ──────────────────────────────────────
     this.#room.onPeerJoin(peerId => {
-      console.log(`[SpaceWork] peer connected (wire): ${peerId}`)
       this.#sendIntro(this.#makeIntro(), peerId)
     })
 
@@ -93,7 +91,6 @@ export class RemoteSync {
     // the stable identityId so all higher-level code uses a consistent key.
     this.#room.onPeerLeave(wirePeerId => {
       const identityId = this.#wireToIdentity.get(wirePeerId) ?? wirePeerId
-      console.log(`[SpaceWork] peer disconnected: ${identityId.slice(-8)}`)
       this.#wireToIdentity.delete(wirePeerId)
       this.#fire('PEER_LEAVE', { from: identityId })
     })
@@ -103,7 +100,6 @@ export class RemoteSync {
     // here so the voice layer can resolve it when WebRTC media tracks arrive.
     this.#onIntro(({ identityId, username, presetId = 0, status = 'available' }, _wirePeerId) => {
       const from = identityId   // stable key for the rest of the session
-      console.log(`[SpaceWork] intro received from ${username} (${identityId.slice(-8)})`)
       this.#wireToIdentity.set(_wirePeerId, identityId)
       this.#fire('HELLO', { from, username, presetId, status })
       // Reply so they know us
