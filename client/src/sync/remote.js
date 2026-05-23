@@ -177,12 +177,31 @@ class NostrPool {
 
 class RTCPeer extends EventTarget {
   #pc
-  #dc            = null
-  #isPolite      = false
-  #makingOffer   = false
-  #ignoreOffer   = false
-  #onMessageCb   = null
-  #onTrackCb     = null
+  #dc              = null
+  #isPolite        = false
+  #makingOffer     = false
+  #ignoreOffer     = false
+  #onMessageCb     = null
+  #onTrackCb       = null
+  #iceQueue        = []     // ICE candidates buffered before remote desc is set
+  #hasRemoteDesc   = false  // true once setRemoteDescription succeeds
+
+  // Shared negotiate logic — used by onnegotiationneeded and manual re-trigger
+  #negotiate = async () => {
+    if (this.#makingOffer) return
+    if (this.#pc.signalingState !== 'stable') return
+    try {
+      this.#makingOffer = true
+      await this.#pc.setLocalDescription()
+      this.dispatchEvent(new CustomEvent('signal', {
+        detail: { type: 'offer', sdp: this.#pc.localDescription.sdp },
+      }))
+    } catch (err) {
+      console.warn('[RTCPeer] negotiate error', err)
+    } finally {
+      this.#makingOffer = false
+    }
+  }
 
   constructor (isPolite) {
     super()
@@ -209,19 +228,7 @@ class RTCPeer extends EventTarget {
     }
 
     // onnegotiationneeded fires when tracks are added or on first connection
-    this.#pc.onnegotiationneeded = async () => {
-      try {
-        this.#makingOffer = true
-        await this.#pc.setLocalDescription()
-        this.dispatchEvent(new CustomEvent('signal', {
-          detail: { type: 'offer', sdp: this.#pc.localDescription.sdp },
-        }))
-      } catch (err) {
-        console.warn('[RTCPeer] negotiation error', err)
-      } finally {
-        this.#makingOffer = false
-      }
-    }
+    this.#pc.onnegotiationneeded = this.#negotiate
 
     this.#pc.ontrack = ({ track, streams }) => {
       const stream = streams[0] ?? new MediaStream([track])
@@ -247,28 +254,51 @@ class RTCPeer extends EventTarget {
   async handleSignal ({ type, sdp, candidate }) {
     try {
       if (type === 'offer') {
-        const collision = this.#makingOffer || this.#pc.signalingState !== 'stable'
-        this.#ignoreOffer = !this.#isPolite && collision
+        const hadLocalOffer = this.#pc.signalingState === 'have-local-offer'
+        const collision     = this.#makingOffer || hadLocalOffer
+        this.#ignoreOffer   = !this.#isPolite && collision
         if (this.#ignoreOffer) return
 
         await this.#pc.setRemoteDescription({ type: 'offer', sdp })
+        this.#hasRemoteDesc = true
         await this.#pc.setLocalDescription()
         this.dispatchEvent(new CustomEvent('signal', {
           detail: { type: 'answer', sdp: this.#pc.localDescription.sdp },
         }))
+        await this.#drainIceQueue()
+
+        // Chrome does not re-fire onnegotiationneeded after implicit rollback.
+        // If the polite peer had a pending offer that was rolled back, any local
+        // tracks in that offer still need to be sent — re-trigger manually.
+        if (this.#isPolite && hadLocalOffer) {
+          setTimeout(this.#negotiate, 200)
+        }
+
       } else if (type === 'answer') {
         if (this.#pc.signalingState === 'have-local-offer') {
           await this.#pc.setRemoteDescription({ type: 'answer', sdp })
+          this.#hasRemoteDesc = true
+          await this.#drainIceQueue()
         }
+
       } else if (type === 'ice') {
-        try {
-          await this.#pc.addIceCandidate(candidate)
-        } catch (err) {
-          if (!this.#ignoreOffer) throw err
+        if (!this.#hasRemoteDesc) {
+          this.#iceQueue.push(candidate)
+        } else {
+          try { await this.#pc.addIceCandidate(candidate) } catch (err) {
+            if (!this.#ignoreOffer) console.warn('[RTCPeer] addIceCandidate', err)
+          }
         }
       }
     } catch (err) {
       console.warn('[RTCPeer] handleSignal', type, err)
+    }
+  }
+
+  async #drainIceQueue () {
+    const queued = this.#iceQueue.splice(0)
+    for (const c of queued) {
+      try { await this.#pc.addIceCandidate(c) } catch {}
     }
   }
 
@@ -425,13 +455,10 @@ export class RemoteSync {
 
     // Audio / video tracks → voice layer
     peer.onTrack((track, stream) => {
-      if (!this.#voiceCb) return
-      const emit = () => this.#voiceCb(track, stream, identityId, nostrPubkey)
-      if (!track.muted) emit()
-      else track.addEventListener('unmute', emit, { once: true })
+      if (this.#voiceCb) this.#voiceCb(track, stream, identityId, nostrPubkey)
     })
 
-    // Data channel open → send intro + queued voice tracks
+    // Data channel open → send intro
     peer.addEventListener('open', () => {
       peer.send({
         type:       'intro',
@@ -440,7 +467,6 @@ export class RemoteSync {
         presetId:   this.#presetId,
         status:     this.#status,
       })
-      for (const { track, stream } of this.#localTracks) peer.addTrack(track, stream)
     })
 
     // Connection failed → tear down
@@ -560,9 +586,7 @@ export class RemoteSync {
       for (const receiver of peer.pc.getReceivers()) {
         const t = receiver.track
         if (!t || t.kind !== 'audio' || t.readyState === 'ended') continue
-        const emit = () => cb(t, new MediaStream([t]), identityId, nostrPubkey)
-        if (!t.muted) emit()
-        else t.addEventListener('unmute', emit, { once: true })
+        cb(t, new MediaStream([t]), identityId, nostrPubkey)
       }
     }
   }
