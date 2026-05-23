@@ -9,34 +9,71 @@ permissions:
   contents: write   # needed to push to gh-pages branch
 
 jobs:
-  deploy:
+  # ── 1. Test ────────────────────────────────────────────────────────────────
+  # Unit tests + E2E P2P discovery test.
+  # Deploy is blocked until this job passes.
+  test:
     runs-on: ubuntu-latest
 
     steps:
-      # ── 1. Checkout ──────────────────────────────────────────────────────────
       - uses: actions/checkout@v4
 
-      # ── 2. Node ──────────────────────────────────────────────────────────────
       - uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # ── 3. Build ─────────────────────────────────────────────────────────────
+      - name: Install dependencies
+        run: cd client && npm install
+
+      # ── Unit tests (Vitest, no network) ──────────────────────────────────
+      - name: Unit tests
+        run: cd client && npm test
+
+      # ── Build (needed for E2E preview server) ─────────────────────────────
+      - name: Build
+        run: cd client && npm run build
+
+      # ── Install Playwright + Chromium ─────────────────────────────────────
+      - name: Install Playwright browsers
+        run: cd client && npx playwright install --with-deps chromium
+
+      # ── E2E P2P discovery test ────────────────────────────────────────────
+      # Spins up two headless browsers in the same room and confirms they
+      # discover each other via BitTorrent DHT signalling + WebRTC.
+      # If peers can't see each other this step fails and deploy is skipped.
+      - name: E2E — P2P peer discovery
+        run: cd client && npm run test:e2e
+        timeout-minutes: 3
+
+      # Upload Playwright report on failure so you can inspect what went wrong
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: client/playwright-report/
+          retention-days: 7
+
+  # ── 2. Deploy ──────────────────────────────────────────────────────────────
+  # Only runs when test job succeeds.
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Install dependencies
         run: cd client && npm install
 
       - name: Build
         run: cd client && npm run build
-        # vite.config.js uses base: './' so all asset paths are relative.
-        # This works on GitHub Pages (served at /spacework/) without needing
-        # the repo name hardcoded, and also works on IPFS gateways.
 
-      # ── 4. Deploy to GitHub Pages ────────────────────────────────────────────
-      # Pushes client/dist to the gh-pages branch.
-      # GitHub Pages then serves it at: https://xpacenet.github.io/spacework/
-      #
-      # Hash routing (#room-name) is handled entirely in the browser so
-      # no 404 redirect tricks are needed — it just works.
+      # ── Deploy to GitHub Pages ────────────────────────────────────────────
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
@@ -44,13 +81,7 @@ jobs:
           publish_dir: ./client/dist
           commit_message: "deploy: ${{ github.sha }}"
 
-      # ── 5. Compute IPFS CID (no pinning service needed) ──────────────────────
-      # Installs Kubo locally in the CI runner, adds the built files in
-      # offline mode (no network, no account), and prints the CID.
-      #
-      # The CID is the cryptographic hash of the exact content that was deployed.
-      # Anyone can verify it. If you later want to pin it to IPFS, this is the
-      # address to use — via your local node, Pinata, Storacha, or any service.
+      # ── Compute IPFS CID (offline, no account needed) ─────────────────────
       - name: Compute IPFS CID
         id: ipfs
         run: |
@@ -60,14 +91,10 @@ jobs:
           tar -xzf kubo.tar.gz
           sudo ./kubo/install.sh
           ipfs init --profile=lowpower
-
-          # --offline: compute CID from content locally, no daemon or network needed
-          # --cid-version=1: produces a bafybei... CIDv1 (shorter, case-insensitive)
-          # -Q: quiet — only print the root CID
           CID=$(ipfs add -r --cid-version=1 -Q --offline ./client/dist)
           echo "cid=$CID" >> "$GITHUB_OUTPUT"
 
-      # ── 6. Job summary ───────────────────────────────────────────────────────
+      # ── Job summary ───────────────────────────────────────────────────────
       - name: Write deploy summary
         run: |
           REPO="${{ github.event.repository.name }}"

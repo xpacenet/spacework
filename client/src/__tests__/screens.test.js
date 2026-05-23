@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 
 // ── THREE and DOM are not available in Node — stub what SCREENS needs ──────
 vi.mock('three', () => ({
@@ -31,17 +31,19 @@ global.requestAnimationFrame = () => {}
 import { SCREENS } from '../scene/screens.js'
 
 // ── SCREENS data structure ─────────────────────────────────────────────────
+// Building has 4 zones: DESIGN, ENGINEERING, OPS, FUN
 
 describe('SCREENS data', () => {
-  it('has exactly 3 screens — one per zone', () => {
-    expect(SCREENS).toHaveLength(3)
+  it('has exactly 4 screens — one per zone', () => {
+    expect(SCREENS).toHaveLength(4)
   })
 
-  it('covers all three zones', () => {
+  it('covers all four zones', () => {
     const zones = SCREENS.map(s => s.zone)
-    expect(zones).toContain('BRIDGE')
-    expect(zones).toContain('LAB')
-    expect(zones).toContain('LOUNGE')
+    expect(zones).toContain('DESIGN')
+    expect(zones).toContain('ENGINEERING')
+    expect(zones).toContain('OPS')
+    expect(zones).toContain('FUN')
   })
 
   it('each screen has required fields', () => {
@@ -79,20 +81,26 @@ describe('SCREENS data', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it('Bridge screen is on the back wall (z > 18)', () => {
-    const bridge = SCREENS.find(s => s.zone === 'BRIDGE')
-    expect(bridge.position.z).toBeGreaterThan(18)
-  })
-
-  it('Lounge screen is on the back wall (z < -18)', () => {
-    const lounge = SCREENS.find(s => s.zone === 'LOUNGE')
-    expect(lounge.position.z).toBeLessThan(-18)
-  })
-
   it('screens are at a reasonable eye height (y between 1 and 4)', () => {
     SCREENS.forEach(s => {
       expect(s.position.y).toBeGreaterThan(1)
       expect(s.position.y).toBeLessThan(4)
     })
+  })
+
+  it('DESIGN and ENGINEERING screens are in the back half (z < -4)', () => {
+    const design = SCREENS.find(s => s.zone === 'DESIGN')
+    const eng    = SCREENS.find(s => s.zone === 'ENGINEERING')
+    expect(design.position.z).toBeLessThan(-4)
+    expect(eng.position.z).toBeLessThan(-4)
+  })
+
+  it('OPS and FUN screens are in the middle zone (-4 < z < 4)', () => {
+    const ops = SCREENS.find(s => s.zone === 'OPS')
+    const fun = SCREENS.find(s => s.zone === 'FUN')
+    expect(ops.position.z).toBeGreaterThan(-4)
+    expect(ops.position.z).toBeLessThan(4)
+    expect(fun.position.z).toBeGreaterThan(-4)
+    expect(fun.position.z).toBeLessThan(4)
   })
 })

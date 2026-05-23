@@ -21,7 +21,7 @@
  *   bye    — explicit disconnect signal
  */
 
-import { joinRoom } from '@trystero-p2p/nostr'
+import { joinRoom } from '@trystero-p2p/torrent'
 import { getIdentity } from '../identity/index.js'
 
 const APP_ID = 'spacework-v1'
@@ -32,8 +32,8 @@ const APP_ID = 'spacework-v1'
  * Exposed so the lobby can show the current room name.
  */
 export function deriveRoomId () {
-  const raw  = window.location.hash.slice(1).trim().toLowerCase()
-  const slug = raw.replace(/[^a-z0-9-]/g, '-').replace(/-{2,}/g, '-').slice(0, 40) || 'main'
+  const decoded = decodeURIComponent(window.location.hash.slice(1)).trim().toLowerCase()
+  const slug = decoded.replace(/[^a-z0-9-]/g, '-').replace(/-{2,}/g, '-').slice(0, 40) || 'main'
   return `sw-1-${slug}`
 }
 

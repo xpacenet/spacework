@@ -6,6 +6,11 @@ export default defineConfig({
   base: './',
   test: {
     environment: 'node',
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      'e2e/**',            // Playwright tests — run via `npm run test:e2e`, not vitest
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
