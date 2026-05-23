@@ -21,32 +21,10 @@
  *   bye    — explicit disconnect signal
  */
 
-import { joinRoom as joinRoomTorrent } from '@trystero-p2p/torrent'
+import { joinRoom } from '@trystero-p2p/torrent'
 import { getIdentity } from '../identity/index.js'
 
 const APP_ID = 'spacework-v1'
-
-/**
- * Resolve the right Trystero joinRoom function and config at runtime.
- *
- * Production: BitTorrent DHT (@trystero-p2p/torrent) — statically imported so
- *             @trystero-p2p/core is fully initialised before anything else runs.
- * E2E tests:  Local WebSocket relay (@trystero-p2p/ws-relay) — injected via
- *             window.__WS_RELAY__ = 'ws://localhost:8765' by Playwright before
- *             the page loads.  Dynamically imported AFTER core is already up,
- *             avoiding the TDZ circular-init issue that happens when both
- *             packages are lazy-loaded simultaneously.
- */
-async function resolveJoinRoom () {
-  const relay = typeof window !== 'undefined' && window.__WS_RELAY__
-  if (relay) {
-    // Dynamic import is safe here: @trystero-p2p/core was already initialised
-    // by the static torrent import above, so there is no TDZ risk.
-    const { joinRoom } = await import('@trystero-p2p/ws-relay')
-    return { joinRoom, config: { appId: APP_ID, relayConfig: { urls: [relay] } } }
-  }
-  return { joinRoom: joinRoomTorrent, config: { appId: APP_ID } }
-}
 
 /**
  * Derive a stable, sanitised room ID from the current URL hash.
@@ -94,8 +72,7 @@ export class RemoteSync {
 
   async start () {
     const roomId = deriveRoomId()
-    const { joinRoom, config } = await resolveJoinRoom()
-    this.#room = joinRoom(config, roomId)
+    this.#room = joinRoom({ appId: APP_ID }, roomId)
 
     ;[this.#sendIntro,  this.#onIntro]  = this.#room.makeAction('intro')
     ;[this.#sendMove,   this.#onMove]   = this.#room.makeAction('move')
