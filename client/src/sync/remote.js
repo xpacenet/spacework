@@ -21,21 +21,10 @@
  *   bye    — explicit disconnect signal
  */
 
-import { joinRoom } from '@trystero-p2p/torrent'
+import { joinRoom } from '@trystero-p2p/nostr'
 import { getIdentity } from '../identity/index.js'
 
 const APP_ID = 'spacework-v1'
-
-// Extra trackers beyond Trystero's built-in four — improves peer discovery
-// reliability when some trackers are down.
-const RELAY_URLS = [
-  'wss://tracker.webtorrent.dev',
-  'wss://tracker.openwebtorrent.com',
-  'wss://tracker.btorrent.xyz',
-  'wss://tracker.files.fm:7073/announce',
-  'wss://wstracker.online',
-  'wss://tracker.novage.com.ua',
-]
 
 /**
  * Derive a stable, sanitised room ID from the current URL hash.
@@ -84,10 +73,7 @@ export class RemoteSync {
   async start () {
     const roomId = deriveRoomId()
     console.log(`[SpaceWork] joining P2P room: ${roomId}`)
-    this.#room = joinRoom(
-      { appId: APP_ID, relayConfig: { urls: RELAY_URLS, redundancy: RELAY_URLS.length } },
-      roomId,
-    )
+    this.#room = joinRoom({ appId: APP_ID }, roomId)
 
     ;[this.#sendIntro,  this.#onIntro]  = this.#room.makeAction('intro')
     ;[this.#sendMove,   this.#onMove]   = this.#room.makeAction('move')
