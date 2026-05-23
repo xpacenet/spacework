@@ -2,7 +2,7 @@
 
 A virtual spaceship workspace — float in orbit, move between zones, chat and collaborate with teammates in real time. No server required. Fully peer-to-peer.
 
-**Live →** https://mrxpace.github.io/spacework
+**Live →** https://xpacenet.github.io/spacework
 
 ---
 
