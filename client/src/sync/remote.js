@@ -160,13 +160,37 @@ export class RemoteSync {
   // ── Proximity voice (WebRTC media tracks) ──────────────────────────────────
   addVoiceTrack (track, stream) { this.#room?.addTrack(track, stream) }
   onVoiceTrack  (cb)            {
-    this.#room?.onPeerTrack((track, stream, wirePeerId) => {
-      // Resolve Trystero ephemeral ID → stable identityId before handing up.
-      // Falls back to wirePeerId if intro hasn't arrived yet (race condition);
-      // ProximityVoice re-keys pending entries in its update() loop.
+    if (!this.#room) return
+
+    // Register for future tracks arriving from peers.
+    this.#room.onPeerTrack((track, stream, wirePeerId) => {
       const identityId = this.#wireToIdentity.get(wirePeerId) ?? wirePeerId
       cb(track, stream, identityId, wirePeerId)
     })
+
+    // Replay tracks that already arrived before this handler was registered.
+    // This happens when the local user enables voice after a peer has already
+    // sent their track — Trystero fires onPeerTrack exactly once, so we pull
+    // existing receivers from each RTCPeerConnection.
+    //
+    // A receiver whose track is already un-muted (RTP flowing) is replayed
+    // immediately.  A muted track means the WebRTC renegotiation is still in
+    // progress; we attach a one-shot "unmute" listener so we fire the callback
+    // as soon as audio actually starts flowing — never on a silent track.
+    const peers = this.#room.getPeers()    // wireId → RTCPeerConnection
+    for (const [wirePeerId, pc] of Object.entries(peers)) {
+      for (const receiver of pc.getReceivers()) {
+        const t = receiver.track
+        if (!t || t.kind !== 'audio' || t.readyState === 'ended') continue
+        const identityId = this.#wireToIdentity.get(wirePeerId) ?? wirePeerId
+        const emit = () => cb(t, new MediaStream([t]), identityId, wirePeerId)
+        if (!t.muted) {
+          emit()                                     // audio already flowing
+        } else {
+          t.addEventListener('unmute', emit, { once: true })   // wait for RTP
+        }
+      }
+    }
   }
 
   /** Resolve a Trystero ephemeral wire ID to a stable identityId. */
