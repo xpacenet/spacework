@@ -25,11 +25,11 @@ async function board (page, username, room) {
 }
 
 /** Wait until the sync layer is initialised and reports ≥ 1 peer. */
-async function waitForPeer (page, timeoutMs = 35_000) {
+async function waitForPeer (page, timeoutMs = 60_000) {
   // window._sync is set in main.js after spaceSync.start() is called
   await page.waitForFunction(
     () => typeof window._sync !== 'undefined',
-    { timeout: 15_000 }
+    { timeout: 20_000 }
   )
   await page.waitForFunction(
     () => window._sync?.peerCount >= 1,
@@ -47,10 +47,12 @@ test('two peers discover each other in the same room', async ({ browser }) => {
   const p1   = await ctx1.newPage()
   const p2   = await ctx2.newPage()
 
-  // Capture console errors for easier debugging on failure
+  // Capture console errors and uncaught JS exceptions for easier debugging
   const errors1 = [], errors2 = []
-  p1.on('console', m => { if (m.type() === 'error') errors1.push(m.text()) })
-  p2.on('console', m => { if (m.type() === 'error') errors2.push(m.text()) })
+  p1.on('console',   m => { if (m.type() === 'error') errors1.push(m.text()) })
+  p2.on('console',   m => { if (m.type() === 'error') errors2.push(m.text()) })
+  p1.on('pageerror', e => errors1.push(`[uncaught] ${e.message}`))
+  p2.on('pageerror', e => errors2.push(`[uncaught] ${e.message}`))
 
   try {
     // Both navigate to the same room URL

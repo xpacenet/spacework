@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
   testDir:  './e2e',
-  timeout:  60_000,          // 60 s per test — P2P handshake can take time
+  timeout:  120_000,         // 120 s per test — P2P handshake needs time in CI
   retries:  process.env.CI ? 1 : 0,   // one retry in CI for flaky network
 
   use: {

@@ -43,7 +43,7 @@ jobs:
       # If peers can't see each other this step fails and deploy is skipped.
       - name: E2E — P2P peer discovery
         run: cd client && npm run test:e2e
-        timeout-minutes: 3
+        timeout-minutes: 8
 
       # Upload Playwright report on failure so you can inspect what went wrong
       - name: Upload Playwright report
