@@ -1,1 +1,1 @@
-2026-05-23T12:00 nostr-signaling: replace trystero/bittorrent with nostr ephemeral events
+2026-05-24T08:00 turn-relay: add openrelay TURN server for NAT traversal

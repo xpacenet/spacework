@@ -31,10 +31,13 @@ const NOSTR_RELAYS = [
   'wss://relay.damus.io',
 ]
 
-// Free STUN — no account needed
+// STUN (free) + TURN relay for NAT traversal (~20-30 % of real connections need TURN)
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
+  // Open Relay — community TURN, no account needed, port 80 TCP avoids most firewalls
+  { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
 ]
 
 // ── Room ID helpers (same public API as v1) ──────────────────────────────────
