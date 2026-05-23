@@ -288,6 +288,141 @@
         line-height: 1.4; margin: 0;
       }
 
+      /* ── VIRTUAL JOYSTICK ────────────────────────────────────────────── */
+      #vjoy-zone {
+        position: fixed; left: 0; bottom: 0;
+        width: 50vw; height: 50vh;
+        z-index: 13; pointer-events: none;
+        display: none;
+      }
+      #vjoy-base {
+        position: absolute;
+        width: 80px; height: 80px; border-radius: 50%;
+        background: rgba(255,255,255,0.07);
+        border: 2px solid rgba(255,255,255,0.18);
+        display: none; pointer-events: none;
+      }
+      #vjoy-stick {
+        position: absolute; width: 34px; height: 34px; border-radius: 50%;
+        background: rgba(100,160,255,0.55);
+        border: 2px solid rgba(150,190,255,0.8);
+        top: 50%; left: 50%;
+        transform: translate(-50%,-50%);
+        pointer-events: none;
+      }
+
+      /* ── MOBILE BOTTOM BAR ───────────────────────────────────────────── */
+      #mobile-bar {
+        display: none;
+        position: fixed; bottom: 0; left: 0; right: 0;
+        height: 60px; z-index: 16;
+        background: rgba(0,5,20,0.95);
+        border-top: 1px solid rgba(100,150,255,0.18);
+        backdrop-filter: blur(12px);
+        pointer-events: all;
+        align-items: center; justify-content: space-around;
+        padding: 0 8px;
+      }
+      .mb-btn {
+        position: relative;
+        display: flex; align-items: center; justify-content: center;
+        min-width: 48px; height: 44px;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(100,150,255,0.18);
+        border-radius: 10px; color: rgba(255,255,255,0.8);
+        font-size: 1rem; cursor: pointer; font-family: inherit;
+        transition: all 0.15s; padding: 0 10px; gap: 5px;
+        font-weight: 600; letter-spacing: 0.03em; font-size: 0.78rem;
+      }
+      .mb-btn:active { background: rgba(80,130,255,0.25); transform: scale(0.95); }
+      .mb-btn.mb-active { background: rgba(30,60,180,0.5); border-color: #4488ff; color: #fff; }
+      .mb-btn.mb-voice-active {
+        background: rgba(0,180,80,0.18); border-color: rgba(0,220,100,0.5); color: #00e676;
+      }
+      .mb-badge {
+        position: absolute; top: 5px; right: 5px;
+        background: #ff4455; color: #fff;
+        font-size: 0.58rem; font-weight: 700;
+        padding: 1px 4px; border-radius: 8px; display: none;
+      }
+      .mb-badge.visible { display: block; }
+
+      /* ── TOUCH HINT (replaces keyboard hint on touch devices) ─────────── */
+      #touch-hint {
+        display: none;
+        position: absolute; bottom: 70px; left: 20px;
+        background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 10px; padding: 10px 14px;
+        font-size: 0.72rem; color: rgba(255,255,255,0.5);
+        line-height: 1.9;
+      }
+
+      /* ── RESPONSIVE ──────────────────────────────────────────────────── */
+      @media (max-width: 768px) {
+        /* Lobby card */
+        .lobby-card { width: min(94vw, 400px); padding: 28px 20px; gap: 16px; }
+        .lobby-title { font-size: 2rem; }
+        .lobby-sub   { font-size: 0.82rem; }
+
+        /* Hide desktop right-side buttons — mobile bar replaces them */
+        #nm-open-btn, #chat-toggle, #voice-btn, #status-btn { display: none; }
+        /* Avatar btn: move to bottom-left above bar */
+        #avatar-btn { top: auto !important; bottom: 70px; left: 16px; }
+
+        /* Show mobile bar */
+        #mobile-bar { display: flex; }
+
+        /* Status menu: open above the bar */
+        #status-menu { top: auto; bottom: 64px; right: 8px; }
+
+        /* Chat panel: bottom sheet */
+        #chat-panel {
+          position: fixed;
+          top: auto; bottom: 60px; left: 0; right: 0;
+          width: 100%; height: 55vh;
+          border-radius: 16px 16px 0 0;
+          border-left: none; border-right: none; border-bottom: none;
+          border-top: 1px solid rgba(100,150,255,0.25);
+        }
+
+        /* Minimap: hidden on small screens */
+        #minimap { display: none; }
+
+        /* Keyboard hint hidden; touch hint shown */
+        #controls-hint { display: none; }
+        #touch-hint    { display: block; }
+
+        /* IPFS status: above bar */
+        #ipfs-status { bottom: 70px; }
+
+        /* Zone banner: above bar */
+        #zone-banner { padding-bottom: 76px; }
+
+        /* View pill: slightly lower, bigger tap area */
+        #view-toggle { top: 64px; }
+        .vtbtn { padding: 9px 11px; font-size: 0.7rem; }
+
+        /* Toast: a bit lower */
+        #hud-toast { top: 112px; }
+
+        /* Door hint: above bar */
+        #door-proximity-hint { bottom: 72px !important; }
+
+        /* Network map: hide side panel, horizontal-scroll filters */
+        #nm-node-panel { display: none; }
+        .nm-filters { overflow-x: auto; flex-wrap: nowrap; padding: 0 4px; }
+        .nm-filter  { white-space: nowrap; flex-shrink: 0; }
+
+        /* Screen overlay tool label: hide to save space */
+        #screen-overlay-tool { display: none; }
+      }
+
+      @media (max-width: 400px) {
+        .lobby-title { font-size: 1.7rem; }
+        .lobby-card  { padding: 22px 14px; }
+        .vtbtn { padding: 8px 7px; font-size: 0.64rem; }
+      }
+
       /* ── SCREEN OVERLAY ───────────────────────────────────────────────── */
       #screen-overlay {
         position: fixed; inset: 0; z-index: 50;
@@ -785,7 +920,7 @@
         font-weight: 600; color: #fff;
       }
     </style>
-    <script type="module" crossorigin src="./assets/index-DeKgpDWS.js"></script>
+    <script type="module" crossorigin src="./assets/index-CQzpDBCO.js"></script>
   </head>
   <body>
     <canvas id="canvas"></canvas>
@@ -935,6 +1070,28 @@
         <div class="hint-row"><span class="key">W A S D</span>&nbsp; FPS move (3D)</div>
         <div class="hint-row"><span class="key">E</span>&nbsp; Open nearby screen</div>
         <div class="hint-row"><span class="key">R</span>&nbsp; Respawn at entrance</div>
+      </div>
+
+      <!-- Touch hint (shown on mobile in place of keyboard hint) -->
+      <div id="touch-hint">
+        <div class="hint-row">👆 Tap — Walk there</div>
+        <div class="hint-row">🕹 Left drag — Move</div>
+        <div class="hint-row">👁 Right drag — Look</div>
+        <div class="hint-row">🤏 Pinch — Zoom</div>
+      </div>
+
+      <!-- Virtual joystick (touch only, 3rd/1st person) -->
+      <div id="vjoy-zone">
+        <div id="vjoy-base"><div id="vjoy-stick"></div></div>
+      </div>
+
+      <!-- Mobile bottom action bar -->
+      <div id="mobile-bar">
+        <button class="mb-btn" id="mb-avatar-btn">🧑 Avatar</button>
+        <button class="mb-btn" id="mb-nm-btn">🌐</button>
+        <button class="mb-btn" id="mb-chat-btn">💬 <span class="mb-badge" id="mb-chat-badge"></span></button>
+        <button class="mb-btn" id="mb-voice-btn">🎙</button>
+        <button class="mb-btn" id="mb-status-btn">🟢 <span id="mb-status-label">OK</span></button>
       </div>
 
       <!-- Door proximity hint (appears when near a door) -->
