@@ -64,6 +64,9 @@ export class ProximityVoice {
         micTimeout,
       ])
       this._ctx    = new AudioContext()
+      // Chrome suspends AudioContext by default — resume() from user gesture
+      // so incoming audio actually plays.
+      if (this._ctx.state === 'suspended') await this._ctx.resume()
       this._active = true
 
       // Local mic analyser — to detect when WE are talking (no playback)

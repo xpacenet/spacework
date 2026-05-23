@@ -386,16 +386,13 @@ import { WorldHistory }      from './universe/index.js'
           if (_voiceConnecting) return   // ignore extra clicks while awaiting mic
           _voiceConnecting = true
           voiceBtn.textContent = '⏳ Connecting…'
-          voiceBtn.disabled    = true
           const ok = await voice.start(spaceSync)
-          _voiceConnecting  = false
-          voiceBtn.disabled = false
+          _voiceConnecting = false
           if (!ok) {
             voiceBtn.textContent = '🚫 No mic'
             voiceBtn.className   = 'hud-side-btn'
             return
           }
-          // _notify() inside start() already fired _updateVoiceBtn — this is a fallback
           _updateVoiceBtn({ active: voice.active, muted: voice.muted })
         })
       }
