@@ -4,6 +4,18 @@ import { defineConfig } from 'vite'
 // /ipfs/<CID>/ rather than the root. Works for local dev too.
 export default defineConfig({
   base: './',
+  build: {
+    rollupOptions: {
+      output: {
+        // Keep all @trystero-p2p packages in their own chunk so Rollup
+        // initialises them before app code — prevents TDZ crashes caused
+        // by core's module-level side-effects being reordered.
+        manualChunks (id) {
+          if (id.includes('@trystero-p2p')) return 'trystero'
+        },
+      },
+    },
+  },
   test: {
     environment: 'node',
     exclude: [

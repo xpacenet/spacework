@@ -259,6 +259,12 @@ import { WorldHistory }      from './universe/index.js'
         })
       })
 
+      // ── Proximity voice — must be declared before any peer event listeners
+      //    that reference it, otherwise the const TDZ fires when a peer
+      //    leaves during spaceSync.start().
+      const voice    = new ProximityVoice()
+      const voiceBtn = document.getElementById('voice-btn')
+
       // ── Peer avatars ──────────────────────────────────────────────────────
       const _avatars      = new Map()   // peerId → THREE.Group
       const _peerUsernames = new Map()  // peerId → username
@@ -346,10 +352,7 @@ import { WorldHistory }      from './universe/index.js'
       spaceSync.start(username, _localPreset, _selfStatus)
       window._sync = spaceSync
 
-      // ── Proximity voice ─────────────────────────────────────────────────────
-      const voice    = new ProximityVoice()
-      const voiceBtn = document.getElementById('voice-btn')
-
+      // ── Proximity voice (continued — voice + voiceBtn declared above) ────────
       const _updateVoiceBtn = ({ active, muted } = {}) => {
         if (!voiceBtn) return
         if (!active) {
