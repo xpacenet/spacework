@@ -21,7 +21,7 @@
  *   bye    — explicit disconnect signal
  */
 
-import { joinRoom } from '@trystero-p2p/torrent'
+import { joinRoom } from '@trystero-p2p/nostr'
 import { getIdentity } from '../identity/index.js'
 
 const APP_ID = 'spacework-v1'
