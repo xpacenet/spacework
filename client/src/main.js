@@ -383,24 +383,31 @@ import { WorldHistory }      from './universe/index.js'
       // ── Chat ──────────────────────────────────────────────────────────────────
       const chatToggle = document.getElementById('chat-toggle')
       const chatPanel  = document.getElementById('chat-panel')
+      const chatClose  = document.getElementById('chat-close')
       const chatInput  = document.getElementById('chat-input')
       const chatSend   = document.getElementById('chat-send')
       const chatMsgs   = document.getElementById('chat-messages')
       const chatBadge  = document.getElementById('chat-badge')
       let   unread     = 0
 
+      function openChat () {
+        chatPanel.classList.add('open')
+        chatToggle.classList.add('open')
+        unread = 0
+        chatBadge.textContent = ''
+        chatBadge.classList.remove('visible')
+        chatInput.focus()
+      }
+      function closeChat () {
+        chatPanel.classList.remove('open')
+        chatToggle.classList.remove('open')
+      }
+
       chatToggle.addEventListener('click', e => {
         e.stopPropagation()
-        const opening = !chatPanel.classList.contains('open')
-        chatPanel.classList.toggle('open', opening)
-        chatToggle.classList.toggle('open', opening)
-        if (opening) {
-          unread = 0
-          chatBadge.textContent = ''
-          chatBadge.classList.remove('visible')
-          chatInput.focus()
-        }
+        chatPanel.classList.contains('open') ? closeChat() : openChat()
       })
+      chatClose.addEventListener('click', e => { e.stopPropagation(); closeChat() })
 
       function sendMessage () {
         const text = chatInput.value.trim()
