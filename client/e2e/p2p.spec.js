@@ -6,19 +6,29 @@
  * The test passes only when each peer appears in the other's swarm,
  * which means the full stack worked:
  *
- *   URL hash → room ID → BitTorrent tracker announce → WebRTC offer/answer
+ *   URL hash → room ID → WS relay announce → WebRTC offer/answer
  *   → DataChannel open → intro exchange → peer:join event fired
+ *
+ * Signalling uses a local WebSocket relay (started by global-setup.js)
+ * so the test has no dependency on public BitTorrent DHT trackers.
+ * Production still uses BitTorrent DHT — window.__WS_RELAY__ is only
+ * injected here, never in the real app.
  *
  * This runs before every deploy. If it fails, deploy is blocked.
  */
 import { test, expect } from '@playwright/test'
+import { WS_RELAY_URL } from './global-setup.js'
 
 const BASE_URL = 'http://localhost:4173'
+
+/** Inject the local relay URL before any page script runs. */
+async function useLocalRelay (ctx) {
+  await ctx.addInitScript(url => { window.__WS_RELAY__ = url }, WS_RELAY_URL)
+}
 
 /** Fill the lobby and click Enter. */
 async function board (page, username, room) {
   await page.fill('#username', username)
-  // Clear the room input and type the unique room name
   await page.fill('#room-name', '')
   await page.fill('#room-name', room)
   await page.click('#enter-btn')
@@ -44,8 +54,13 @@ test('two peers discover each other in the same room', async ({ browser }) => {
   // Two separate browser contexts = two different identities / localStorage
   const ctx1 = await browser.newContext()
   const ctx2 = await browser.newContext()
-  const p1   = await ctx1.newPage()
-  const p2   = await ctx2.newPage()
+
+  // Route signalling through local relay (not public BitTorrent trackers)
+  await useLocalRelay(ctx1)
+  await useLocalRelay(ctx2)
+
+  const p1 = await ctx1.newPage()
+  const p2 = await ctx2.newPage()
 
   // Capture console errors and uncaught JS exceptions for easier debugging
   const errors1 = [], errors2 = []
@@ -90,8 +105,12 @@ test('peers in different rooms do NOT see each other', async ({ browser }) => {
   const ts   = Date.now()
   const ctx1 = await browser.newContext()
   const ctx2 = await browser.newContext()
-  const p1   = await ctx1.newPage()
-  const p2   = await ctx2.newPage()
+
+  await useLocalRelay(ctx1)
+  await useLocalRelay(ctx2)
+
+  const p1 = await ctx1.newPage()
+  const p2 = await ctx2.newPage()
 
   try {
     await p1.goto(`${BASE_URL}/#room-a-${ts}`)
@@ -103,8 +122,8 @@ test('peers in different rooms do NOT see each other', async ({ browser }) => {
     ])
 
     // Wait for sync to initialise on both sides
-    await p1.waitForFunction(() => typeof window._sync !== 'undefined', { timeout: 15_000 })
-    await p2.waitForFunction(() => typeof window._sync !== 'undefined', { timeout: 15_000 })
+    await p1.waitForFunction(() => typeof window._sync !== 'undefined', { timeout: 20_000 })
+    await p2.waitForFunction(() => typeof window._sync !== 'undefined', { timeout: 20_000 })
 
     // Give them 10 s to (not) find each other
     await p1.waitForTimeout(10_000)

@@ -5,8 +5,10 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
-// We mock the Trystero import so Vitest doesn't try to load the browser-only module.
-vi.mock('@trystero-p2p/torrent', () => ({ joinRoom: vi.fn() }))
+// Mock both Trystero strategies — remote.js uses dynamic imports so both
+// need to be stubbed to prevent Vitest loading browser-only modules.
+vi.mock('@trystero-p2p/torrent',   () => ({ joinRoom: vi.fn() }))
+vi.mock('@trystero-p2p/ws-relay',  () => ({ joinRoom: vi.fn() }))
 
 const { deriveRoomId, currentRoomName } =
   await import('../remote.js')

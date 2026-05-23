@@ -1,13 +1,13 @@
 import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
-  testDir:  './e2e',
-  timeout:  120_000,         // 120 s per test — P2P handshake needs time in CI
-  retries:  process.env.CI ? 1 : 0,   // one retry in CI for flaky network
+  testDir:     './e2e',
+  globalSetup: './e2e/global-setup.js',
+  timeout:     120_000,      // 120 s per test
+  retries:     process.env.CI ? 1 : 0,
 
   use: {
     headless: true,
-    // No baseURL — the webServer option below handles it
   },
 
   // Start `vite preview` automatically before running tests.

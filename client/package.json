@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
+    "@trystero-p2p/ws-relay": "^0.24.0",
     "@vitest/coverage-v8": "^4.1.6",
     "jsdom": "^29.1.1",
     "vite": "^5.2.0",
