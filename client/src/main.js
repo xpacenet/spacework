@@ -390,17 +390,22 @@ import { WorldHistory }      from './universe/index.js'
       const chatBadge  = document.getElementById('chat-badge')
       let   unread     = 0
 
+      const mbChatBadge = document.getElementById('mb-chat-badge')
+
       function openChat () {
         chatPanel.classList.add('open')
         chatToggle.classList.add('open')
+        document.getElementById('mb-chat-btn')?.classList.add('mb-active')
         unread = 0
         chatBadge.textContent = ''
         chatBadge.classList.remove('visible')
+        if (mbChatBadge) { mbChatBadge.textContent = ''; mbChatBadge.classList.remove('visible') }
         chatInput.focus()
       }
       function closeChat () {
         chatPanel.classList.remove('open')
         chatToggle.classList.remove('open')
+        document.getElementById('mb-chat-btn')?.classList.remove('mb-active')
       }
 
       chatToggle.addEventListener('click', e => {
@@ -408,6 +413,10 @@ import { WorldHistory }      from './universe/index.js'
         chatPanel.classList.contains('open') ? closeChat() : openChat()
       })
       chatClose.addEventListener('click', e => { e.stopPropagation(); closeChat() })
+      document.getElementById('mb-chat-btn')?.addEventListener('click', e => {
+        e.stopPropagation()
+        chatPanel.classList.contains('open') ? closeChat() : openChat()
+      })
 
       function sendMessage () {
         const text = chatInput.value.trim()
@@ -435,8 +444,10 @@ import { WorldHistory }      from './universe/index.js'
         chatMsgs.scrollTop = chatMsgs.scrollHeight
         if (!chatPanel.classList.contains('open') && !isSelf) {
           unread++
-          chatBadge.textContent = unread > 9 ? '9+' : unread
+          const label = unread > 9 ? '9+' : String(unread)
+          chatBadge.textContent = label
           chatBadge.classList.add('visible')
+          if (mbChatBadge) { mbChatBadge.textContent = label; mbChatBadge.classList.add('visible') }
         }
       }
 
@@ -470,6 +481,38 @@ import { WorldHistory }      from './universe/index.js'
       document.getElementById('nm-open-btn')?.addEventListener('click', e => {
         e.stopPropagation()
         openNetworkMap(swarmNet, visLayer, username)
+      })
+
+      // ── Mobile bottom bar wiring ─────────────────────────────────────────────
+      // Proxy each mobile bar button to its desktop counterpart, or inline action.
+      document.getElementById('mb-avatar-btn')?.addEventListener('click', () =>
+        document.getElementById('avatar-btn')?.click())
+      document.getElementById('mb-nm-btn')?.addEventListener('click', e => {
+        e.stopPropagation()
+        openNetworkMap(swarmNet, visLayer, username)
+      })
+      document.getElementById('mb-voice-btn')?.addEventListener('click', e => {
+        e.stopPropagation()
+        voiceBtn?.click()
+      })
+      document.getElementById('mb-status-btn')?.addEventListener('click', e => {
+        e.stopPropagation()
+        statusBtn?.click()
+      })
+
+      // Keep mobile bar voice button in sync with voice state
+      voice.onStateChange(({ active, muted } = {}) => {
+        const btn = document.getElementById('mb-voice-btn')
+        if (!btn) return
+        if (!active) {
+          btn.innerHTML = '🎙'; btn.className = 'mb-btn'
+        } else if (muted) {
+          btn.innerHTML = '🔇'; btn.className = 'mb-btn mb-voice-active'
+          btn.style.color = '#ff6b6b'
+        } else {
+          btn.innerHTML = '🎙'; btn.className = 'mb-btn mb-voice-active'
+          btn.style.color = ''
+        }
       })
 
       // ── Screen + door proximity ──────────────────────────────────────────────

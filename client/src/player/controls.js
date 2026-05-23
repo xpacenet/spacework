@@ -40,6 +40,13 @@ export function setupControls (avatar, camera, domElement) {
   let _ovZoom    = 38     // camera height (lower = zoomed in)
   let _ovPanned  = false  // true while user has manually panned away
 
+  // ── Touch / virtual joystick state ───────────────────────────────────────
+  const _vjoy     = { active: false, x: 0, y: 0, id: -1, ox: 0, oy: 0 }
+  const _camTouch = { active: false, lx: 0, ly: 0, id: -1 }
+  const _pinch    = { active: false, dist: 0 }
+  const _vjoyBase  = document.getElementById('vjoy-base')
+  const _vjoyStick = document.getElementById('vjoy-stick')
+
   // ── Keyboard ──────────────────────────────────────────────────────────────
   document.addEventListener('keydown', e => {
     keys[e.code] = true
@@ -140,6 +147,121 @@ export function setupControls (avatar, camera, domElement) {
     }
   }, { passive: false })
 
+  // ── Touch events (mobile / tablet) ───────────────────────────────────────
+  //
+  // Split-screen gesture scheme:
+  //   Overview:           1-finger drag = pan,  2-finger pinch = zoom
+  //   3rd-person / 1st:   left-half drag = joystick (move),
+  //                       right-half drag = camera look,
+  //                       2-finger pinch = zoom/arm length
+  //   Flat:               FlatMap handles all its own touch — we skip here.
+
+  domElement.addEventListener('touchstart', e => {
+    if (mode === 'flat') return
+    e.preventDefault()
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i]
+      if (mode === 'overview') {
+        if (!_camTouch.active) {
+          _camTouch.active = true; _camTouch.id = t.identifier
+          _camTouch.lx = t.clientX; _camTouch.ly = t.clientY
+          _dragging = true; _dragMoved = false
+        }
+      } else {
+        // third / first — split by screen half
+        if (t.clientX < window.innerWidth * 0.5 && !_vjoy.active) {
+          _vjoy.active = true; _vjoy.id = t.identifier
+          _vjoy.ox = t.clientX; _vjoy.oy = t.clientY
+          _vjoy.x = 0; _vjoy.y = 0
+          if (_vjoyBase) {
+            _vjoyBase.style.left    = (t.clientX - 40) + 'px'
+            _vjoyBase.style.top     = (t.clientY - 40) + 'px'
+            _vjoyBase.style.display = 'block'
+            if (_vjoyStick) _vjoyStick.style.transform = 'translate(-50%,-50%)'
+          }
+        } else if (t.clientX >= window.innerWidth * 0.5 && !_camTouch.active) {
+          _camTouch.active = true; _camTouch.id = t.identifier
+          _camTouch.lx = t.clientX; _camTouch.ly = t.clientY
+        }
+      }
+    }
+    // Pinch start
+    if (e.touches.length >= 2) {
+      const t0 = e.touches[0], t1 = e.touches[1]
+      const dx = t1.clientX - t0.clientX, dy = t1.clientY - t0.clientY
+      _pinch.active = true; _pinch.dist = Math.sqrt(dx*dx + dy*dy)
+    }
+  }, { passive: false })
+
+  domElement.addEventListener('touchmove', e => {
+    if (mode === 'flat') return
+    e.preventDefault()
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i]
+      // Joystick
+      if (t.identifier === _vjoy.id) {
+        const dx = t.clientX - _vjoy.ox
+        const dy = t.clientY - _vjoy.oy
+        const MAX_R = 40
+        const len   = Math.sqrt(dx*dx + dy*dy)
+        const scale = len > MAX_R ? MAX_R / len : 1
+        _vjoy.x = (dx * scale) / MAX_R
+        _vjoy.y = (dy * scale) / MAX_R
+        if (_vjoyStick) {
+          _vjoyStick.style.transform =
+            `translate(calc(-50% + ${dx*scale}px), calc(-50% + ${dy*scale}px))`
+        }
+      }
+      // Camera drag
+      if (t.identifier === _camTouch.id) {
+        const dx = t.clientX - _camTouch.lx
+        const dy = t.clientY - _camTouch.ly
+        if (mode === 'overview') {
+          const scale = (_ovZoom * 1.534 * 0.9) / window.innerHeight
+          _ovCamX -= dx * scale
+          _ovCamZ += dy * scale
+          _ovCamX = Math.max(-60, Math.min(60, _ovCamX))
+          _ovCamZ = Math.max(-60, Math.min(60, _ovCamZ))
+          _ovPanned = true
+          if (Math.abs(dx) > 2 || Math.abs(dy) > 2) _dragMoved = true
+        } else {
+          yaw      -= dx * 0.004
+          camPitch  = Math.max(-0.05, Math.min(1.0, camPitch + dy * 0.003))
+        }
+        _camTouch.lx = t.clientX; _camTouch.ly = t.clientY
+      }
+    }
+    // Pinch zoom
+    if (_pinch.active && e.touches.length >= 2) {
+      const t0 = e.touches[0], t1 = e.touches[1]
+      const dx = t1.clientX - t0.clientX, dy = t1.clientY - t0.clientY
+      const newDist = Math.sqrt(dx*dx + dy*dy)
+      if (_pinch.dist > 0) {
+        const factor = _pinch.dist / newDist
+        if      (mode === 'overview') _ovZoom  = Math.max(14, Math.min(60, _ovZoom * factor))
+        else if (mode === 'third')    camDist  = Math.max(CAM_DIST_MIN, Math.min(CAM_DIST_MAX, camDist * factor))
+      }
+      _pinch.dist = newDist
+    }
+  }, { passive: false })
+
+  domElement.addEventListener('touchend', e => {
+    if (mode === 'flat') return
+    e.preventDefault()
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i]
+      if (t.identifier === _vjoy.id) {
+        _vjoy.active = false; _vjoy.x = 0; _vjoy.y = 0; _vjoy.id = -1
+        if (_vjoyBase) _vjoyBase.style.display = 'none'
+      }
+      if (t.identifier === _camTouch.id) {
+        _camTouch.active = false; _camTouch.id = -1
+        _dragging = false
+      }
+    }
+    if (e.touches.length < 2) { _pinch.active = false; _pinch.dist = 0 }
+  }, { passive: false })
+
   // ── Navigate to world-space destination ──────────────────────────────────
   function navigate (dest) {
     navPath   = buildPath({ x: avatar.position.x, z: avatar.position.z }, dest)
@@ -169,6 +291,16 @@ export function setupControls (avatar, camera, domElement) {
     if (mode === 'third' || mode === 'overview') document.exitPointerLock?.()
     // Reset FOV when leaving 3rd-person so other modes aren't affected
     if (m !== 'third') { camera.fov = FOV_DEFAULT; camera.updateProjectionMatrix() }
+    // Show/hide virtual joystick (touch only, 3rd/1st person)
+    const isTouch  = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+    const vjoyZone = document.getElementById('vjoy-zone')
+    if (vjoyZone) {
+      vjoyZone.style.display = (isTouch && (m === 'third' || m === 'first')) ? 'block' : 'none'
+    }
+    // Reset joystick state on mode switch
+    _vjoy.active = false; _vjoy.x = 0; _vjoy.y = 0
+    if (_vjoyBase) _vjoyBase.style.display = 'none'
+
     // Show grab cursor in overview; flat mode manages its own canvas cursor
     domElement.style.cursor = mode === 'overview' ? 'grab' : 'pointer'
     // Flat mode covers the 3-D canvas — hide it so it doesn't bleed through
@@ -357,6 +489,14 @@ export function setupControls (avatar, camera, domElement) {
     if (keys['KeyS']     || keys['ArrowDown'])  _move.addScaledVector(_camFwd,   -1)
     if (keys['KeyA']     || keys['ArrowLeft'])  _move.addScaledVector(_camRight, -1)
     if (keys['KeyD']     || keys['ArrowRight']) _move.addScaledVector(_camRight,  1)
+
+    // Virtual joystick (touch devices): left-half drag
+    // _vjoy.y < 0 = push up = move forward; _vjoy.x = strafe
+    if (_vjoy.active) {
+      _move.addScaledVector(_camFwd,  -_vjoy.y)
+      _move.addScaledVector(_camRight, _vjoy.x)
+      if (autoMoving) { autoMoving = false; navPath = [] }
+    }
 
     const anyKey = keys['KeyW']||keys['KeyS']||keys['KeyA']||keys['KeyD']||
                    keys['ArrowUp']||keys['ArrowDown']||keys['ArrowLeft']||keys['ArrowRight']
