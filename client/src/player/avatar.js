@@ -56,7 +56,7 @@ export function setAvatarTalking (avatarGroup, talking, clock = 0) {
     const pulse = 0.75 + Math.sin(clock * 6) * 0.25   // 0.5–1.0
     ring.material.opacity = pulse
     ring.material.color.setHex(0x00ff88)
-    ring.material.emissive.setHex(0x00ff88)
+    ring.material.emissive?.setHex(0x00ff88)
     ring.material.emissiveIntensity = pulse * 1.2
   }
 }

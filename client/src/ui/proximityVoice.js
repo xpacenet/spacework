@@ -51,10 +51,18 @@ export class ProximityVoice {
     if (this._active) return true
     this._syncRef = sync
     try {
-      this._stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 48000 },
-        video: false,
-      })
+      // Wrap getUserMedia in a 15 s timeout so "Connecting…" never hangs
+      // if the browser permission prompt is ignored or slow.
+      const micTimeout = new Promise((_, rej) =>
+        setTimeout(() => rej(new Error('mic permission timed out')), 15_000)
+      )
+      this._stream = await Promise.race([
+        navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 48000 },
+          video: false,
+        }),
+        micTimeout,
+      ])
       this._ctx    = new AudioContext()
       this._active = true
 
