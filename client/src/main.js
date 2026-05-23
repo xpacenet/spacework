@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { AVATAR_PRESETS, createLocalAvatar, animateWalk, setAvatarStatus, setAvatarTalking, applyPreset, STATUS_OPTIONS } from './player/avatar.js'
-// setAvatarTalking used in peer tick loop
+// v2026.05.23 — voice pipeline: onPeerTrack, getReceivers replay, unmute listener
 import { initScene }         from './scene/index.js'
 import { buildScreens }      from './scene/screens.js'
 import { initPlayer }        from './player/index.js'
