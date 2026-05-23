@@ -32,9 +32,7 @@ const APP_ID = 'spacework-v1'
 const TRACKERS = [
   'wss://tracker.webtorrent.dev',
   'wss://tracker.novage.com.ua',
-  'wss://tracker.openwebtorrent.com',
-  'wss://tracker.btorrent.xyz',
-  'wss://tracker.files.fm:7073/announce',
+  // openwebtorrent.com, btorrent.xyz, files.fm:7073 — confirmed dead 2026-05-23
 ]
 
 /**

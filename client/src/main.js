@@ -25,6 +25,7 @@ import { WorldHistory }      from './universe/index.js'
   window._worldHistory = _worldHistory
 
   // ── P2P status indicator ────────────────────────────────────────────────────
+  let _syncStarted = false
   function updateSyncDot ({ peerCount } = {}) {
     document.querySelectorAll('.ipfs-dot').forEach(dot => {
       dot.className = 'ipfs-dot green'
@@ -34,7 +35,15 @@ import { WorldHistory }      from './universe/index.js'
     })
     if (peerCount !== undefined) {
       document.querySelectorAll('#ipfs-peers').forEach(el => {
-        el.textContent = peerCount > 0 ? `${peerCount} peer${peerCount !== 1 ? 's' : ''}` : ''
+        if (peerCount > 0) {
+          el.textContent = `${peerCount} peer${peerCount !== 1 ? 's' : ''}`
+          el.style.color = 'rgba(120,255,160,0.7)'
+        } else if (_syncStarted) {
+          el.textContent = '· searching…'
+          el.style.color = 'rgba(255,200,80,0.7)'
+        } else {
+          el.textContent = ''
+        }
       })
     }
   }
@@ -350,6 +359,8 @@ import { WorldHistory }      from './universe/index.js'
 
       // ── Start sync ───────────────────────────────────────────────────────────
       spaceSync.start(username, _localPreset, _selfStatus)
+      _syncStarted = true
+      updateSyncDot({ peerCount: 0 })  // show "searching…" immediately after start
       window._sync  = spaceSync
       window._voice = voice    // exposed for Playwright smoke tests
 
