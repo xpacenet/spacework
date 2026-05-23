@@ -14,35 +14,35 @@ const { deriveRoomId, currentRoomName } =
 describe('deriveRoomId', () => {
   beforeEach(() => { window.location.hash = '' })
 
-  it('returns sw-1-main when hash is empty', () => {
+  it('returns sw-2-main when hash is empty', () => {
     window.location.hash = ''
-    expect(deriveRoomId()).toBe('sw-1-main')
+    expect(deriveRoomId()).toBe('sw-2-main')
   })
 
   it('derives room id from a simple hash', () => {
     window.location.hash = '#team-alpha'
-    expect(deriveRoomId()).toBe('sw-1-team-alpha')
+    expect(deriveRoomId()).toBe('sw-2-team-alpha')
   })
 
   it('lowercases the slug', () => {
     window.location.hash = '#TeamAlpha'
-    expect(deriveRoomId()).toBe('sw-1-teamalpha')
+    expect(deriveRoomId()).toBe('sw-2-teamalpha')
   })
 
   it('replaces special chars with dashes', () => {
     window.location.hash = '#my-room!!'
     // each !→dash, then consecutive dashes collapse to one
-    expect(deriveRoomId()).toBe('sw-1-my-room-')
+    expect(deriveRoomId()).toBe('sw-2-my-room-')
   })
 
   it('collapses consecutive dashes', () => {
     window.location.hash = '#hello---world'
-    expect(deriveRoomId()).toBe('sw-1-hello-world')
+    expect(deriveRoomId()).toBe('sw-2-hello-world')
   })
 
   it('truncates slug to 40 chars', () => {
     window.location.hash = '#' + 'a'.repeat(50)
-    expect(deriveRoomId()).toBe('sw-1-' + 'a'.repeat(40))
+    expect(deriveRoomId()).toBe('sw-2-' + 'a'.repeat(40))
   })
 })
 
