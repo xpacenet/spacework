@@ -26,9 +26,9 @@ import { getIdentity } from '../identity/index.js'
 
 const APP_ID = 'spacework-v1'
 
-// Only the trackers that are confirmed live (WebSocket 101).
-// Using full redundancy ensures every peer hits every live tracker,
-// maximising the chance of mutual discovery even if one goes down.
+// Production trackers — all 5 tried simultaneously so discovery survives
+// any single tracker going down.  In test/dev a local relay can be injected
+// via  window.__WS_RELAY__ = 'ws://localhost:8765'  (set before page load).
 const TRACKERS = [
   'wss://tracker.webtorrent.dev',
   'wss://tracker.novage.com.ua',
@@ -82,9 +82,12 @@ export class RemoteSync {
   }
 
   async start () {
-    const roomId = deriveRoomId()
+    const roomId  = deriveRoomId()
+    const relays  = window.__WS_RELAY__
+      ? [window.__WS_RELAY__]          // local relay injected by test runner
+      : TRACKERS
     this.#room = joinRoom(
-      { appId: APP_ID, relayConfig: { urls: TRACKERS, redundancy: TRACKERS.length } },
+      { appId: APP_ID, relayConfig: { urls: relays, redundancy: relays.length } },
       roomId,
     )
 
@@ -157,12 +160,12 @@ export class RemoteSync {
   // ── Proximity voice (WebRTC media tracks) ──────────────────────────────────
   addVoiceTrack (track, stream) { this.#room?.addTrack(track, stream) }
   onVoiceTrack  (cb)            {
-    this.#room?.onTrack((t, s, wirePeerId) => {
+    this.#room?.onPeerTrack((track, stream, wirePeerId) => {
       // Resolve Trystero ephemeral ID → stable identityId before handing up.
       // Falls back to wirePeerId if intro hasn't arrived yet (race condition);
       // ProximityVoice re-keys pending entries in its update() loop.
       const identityId = this.#wireToIdentity.get(wirePeerId) ?? wirePeerId
-      cb(t, s, identityId, wirePeerId)
+      cb(track, stream, identityId, wirePeerId)
     })
   }
 

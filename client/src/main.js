@@ -350,7 +350,8 @@ import { WorldHistory }      from './universe/index.js'
 
       // ── Start sync ───────────────────────────────────────────────────────────
       spaceSync.start(username, _localPreset, _selfStatus)
-      window._sync = spaceSync
+      window._sync  = spaceSync
+      window._voice = voice    // exposed for Playwright smoke tests
 
       // ── Proximity voice (continued — voice + voiceBtn declared above) ────────
       const _updateVoiceBtn = ({ active, muted } = {}) => {
