@@ -39,6 +39,28 @@ export function setAvatarStatus (avatarGroup, status) {
   if (mesh) mesh.material.color.setHex(STATUS_COLORS[status] ?? STATUS_COLORS.available)
 }
 
+/**
+ * Toggle the talking glow ring around an avatar.
+ * The ring pulses bright green when active and is invisible when not talking.
+ * Safe to call any time — no-op if the ring mesh isn't built yet.
+ *
+ * @param {THREE.Group} avatarGroup
+ * @param {boolean} talking
+ * @param {number} [clock]  — pass performance.now()/1000 for pulse animation
+ */
+export function setAvatarTalking (avatarGroup, talking, clock = 0) {
+  const ring = avatarGroup.userData.talkRing
+  if (!ring) return
+  ring.visible = talking
+  if (talking) {
+    const pulse = 0.75 + Math.sin(clock * 6) * 0.25   // 0.5–1.0
+    ring.material.opacity = pulse
+    ring.material.color.setHex(0x00ff88)
+    ring.material.emissive.setHex(0x00ff88)
+    ring.material.emissiveIntensity = pulse * 1.2
+  }
+}
+
 /** Swap preset in-place — safe because controls.js holds the group reference. */
 export function applyPreset (avatarGroup, username, presetId) {
   avatarGroup.traverse(child => {
@@ -148,6 +170,22 @@ function _populate (group, username, presetId) {
   statusMesh.position.set(0.58, 2.22, 0)
   group.add(statusMesh)
   group.userData.statusMesh = statusMesh
+
+  // ── Talking ring — flat torus at foot level, shown when voice-active ────────
+  // Preserved across preset swaps via userData so external code can keep a ref.
+  const talkRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.38, 0.045, 6, 32),
+    new THREE.MeshBasicMaterial({
+      color: 0x00ff88, transparent: true, opacity: 0,
+      emissive: new THREE.Color(0x00ff88), depthWrite: false,
+      side: THREE.DoubleSide,
+    })
+  )
+  talkRing.rotation.x = Math.PI / 2    // lay flat on the floor
+  talkRing.position.y = 0.01           // just above floor
+  talkRing.visible    = false
+  group.add(talkRing)
+  group.userData.talkRing = talkRing
 
   // Walk animation refs — preserve walkClock across preset swaps
   group.userData.legL      = legL

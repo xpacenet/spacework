@@ -105,8 +105,9 @@ export class SpaceSync extends EventTarget {
   }
 
   // ── Proximity voice ───────────────────────────────────────────────────────
-  addVoiceTrack (track, stream) { this.#remote?.addVoiceTrack(track, stream) }
-  onVoiceTrack  (cb)            { this.#remote?.onVoiceTrack(cb) }
+  addVoiceTrack (track, stream)    { this.#remote?.addVoiceTrack(track, stream) }
+  onVoiceTrack  (cb)               { this.#remote?.onVoiceTrack(cb) }
+  wireToIdentityId (wirePeerId)    { return this.#remote?.wireToIdentityId(wirePeerId) }
 
   // ── Internal ──────────────────────────────────────────────────────────────
 

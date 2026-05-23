@@ -49,11 +49,12 @@ export function setRoomName (name) {
 }
 
 export class RemoteSync {
-  #room     = null
-  #username = ''
-  #presetId = 0
-  #status   = 'available'
-  #handlers = {}
+  #room           = null
+  #username       = ''
+  #presetId       = 0
+  #status         = 'available'
+  #handlers       = {}
+  #wireToIdentity = new Map()   // Trystero ephemeral ID → stable identityId
 
   // Trystero action senders / receivers
   #sendIntro  = null;  #onIntro  = null
@@ -86,15 +87,20 @@ export class RemoteSync {
     })
 
     // ── Peer departs ────────────────────────────────────────────────────────
-    this.#room.onPeerLeave(peerId => {
-      this.#fire('PEER_LEAVE', { from: peerId })
+    // Trystero fires onPeerLeave with the ephemeral wire ID; resolve it to
+    // the stable identityId so all higher-level code uses a consistent key.
+    this.#room.onPeerLeave(wirePeerId => {
+      const identityId = this.#wireToIdentity.get(wirePeerId) ?? wirePeerId
+      this.#wireToIdentity.delete(wirePeerId)
+      this.#fire('PEER_LEAVE', { from: identityId })
     })
 
     // ── Receive intro — announce peer + reply with our own intro ────────────
-    // 'from' here is Trystero's ephemeral wire ID.
-    // We key peers by identityId (stable Ed25519 hex) from the message body.
+    // _wirePeerId is Trystero's ephemeral ID; we store the wire→identity mapping
+    // here so the voice layer can resolve it when WebRTC media tracks arrive.
     this.#onIntro(({ identityId, username, presetId = 0, status = 'available' }, _wirePeerId) => {
       const from = identityId   // stable key for the rest of the session
+      this.#wireToIdentity.set(_wirePeerId, identityId)
       this.#fire('HELLO', { from, username, presetId, status })
       // Reply so they know us
       this.#sendIntro(this.#makeIntro(), _wirePeerId)
@@ -136,7 +142,18 @@ export class RemoteSync {
 
   // ── Proximity voice (WebRTC media tracks) ──────────────────────────────────
   addVoiceTrack (track, stream) { this.#room?.addTrack(track, stream) }
-  onVoiceTrack  (cb)            { this.#room?.onTrack((t, s, p) => cb(t, s, p)) }
+  onVoiceTrack  (cb)            {
+    this.#room?.onTrack((t, s, wirePeerId) => {
+      // Resolve Trystero ephemeral ID → stable identityId before handing up.
+      // Falls back to wirePeerId if intro hasn't arrived yet (race condition);
+      // ProximityVoice re-keys pending entries in its update() loop.
+      const identityId = this.#wireToIdentity.get(wirePeerId) ?? wirePeerId
+      cb(t, s, identityId, wirePeerId)
+    })
+  }
+
+  /** Resolve a Trystero ephemeral wire ID to a stable identityId. */
+  wireToIdentityId (wirePeerId) { return this.#wireToIdentity.get(wirePeerId) }
 
   // ── Outbound messages ─────────────────────────────────────────────────────
 

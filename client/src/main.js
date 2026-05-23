@@ -1,5 +1,6 @@
 import * as THREE from 'three'
-import { AVATAR_PRESETS, createLocalAvatar, animateWalk, setAvatarStatus, applyPreset, STATUS_OPTIONS } from './player/avatar.js'
+import { AVATAR_PRESETS, createLocalAvatar, animateWalk, setAvatarStatus, setAvatarTalking, applyPreset, STATUS_OPTIONS } from './player/avatar.js'
+// setAvatarTalking used in the peer tick loop below
 import { initScene }         from './scene/index.js'
 import { buildScreens }      from './scene/screens.js'
 import { initPlayer }        from './player/index.js'
@@ -325,14 +326,20 @@ import { WorldHistory }      from './universe/index.js'
         presence.updatePeerStatus(peerId, status)
       })
 
-      // Peer walk animation loop
+      // Peer walk + talking animation loop
       let _peerTickLast = performance.now()
       ;(function _tickPeers () {
         requestAnimationFrame(_tickPeers)
         const now   = performance.now()
         const delta = Math.min((now - _peerTickLast) / 1000, 0.1)
         _peerTickLast = now
-        _avatars.forEach(av => animateWalk(av, av.userData.isMoving ?? false, delta))
+        const clock = now / 1000
+        _avatars.forEach((av, peerId) => {
+          animateWalk(av, av.userData.isMoving ?? false, delta)
+          setAvatarTalking(av, voice.isTalking(peerId), clock)
+        })
+        // Local avatar talking ring
+        player.setSelfTalking(voice.isTalking('self'), clock)
       })()
 
       // ── Start sync ───────────────────────────────────────────────────────────
@@ -358,6 +365,11 @@ import { WorldHistory }      from './universe/index.js'
       }
       voice.onStateChange(_updateVoiceBtn)
       _updateVoiceBtn({ active: false, muted: false })
+
+      // Push talking set to all 2D views whenever it changes
+      voice.onTalkChange(talkingSet => {
+        player.setTalkingPeers(talkingSet)
+      })
 
       if (voiceBtn) {
         voiceBtn.addEventListener('click', async e => {

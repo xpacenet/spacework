@@ -89,8 +89,9 @@ export class FlatMap {
   show () { this._cvs.style.display = 'block' }
   hide () { this._cvs.style.display = 'none'  }
 
-  setPeer   (id, x, z, name) { this._peers.set(id, { x, z, name }) }
-  removePeer(id)              { this._peers.delete(id) }
+  setPeer   (id, x, z, name)  { this._peers.set(id, { x, z, name }) }
+  removePeer(id)               { this._peers.delete(id) }
+  setTalking(talkingSet)       { this._talking = talkingSet }   // Set<identityId>
 
   update (playerPos) {
     const W = this._cvs.width, H = this._cvs.height
@@ -341,35 +342,67 @@ export class FlatMap {
   }
 
   _drawPeers (ctx) {
-    this._peers.forEach(({ x, z, name }) => {
+    const now = performance.now() / 1000
+    this._peers.forEach(({ x, z, name }, id) => {
       const [cx, cy] = this._w2c(x, z)
-      const r = Math.max(5, this._wr(0.4))
+      const r        = Math.max(5, this._wr(0.4))
+      const talking  = this._talking?.has(id)
+
+      if (talking) {
+        // Animated glow ring
+        const pulse = 0.5 + Math.sin(now * 6) * 0.5           // 0–1
+        const ringR = r + 4 + pulse * 4
+        ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2)
+        ctx.strokeStyle = `rgba(0,255,136,${0.6 + pulse * 0.4})`
+        ctx.lineWidth   = 2.5
+        ctx.shadowColor = '#00ff88'; ctx.shadowBlur = 10
+        ctx.stroke(); ctx.shadowBlur = 0
+      }
+
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2)
-      ctx.fillStyle = 'rgba(255,120,150,0.85)'; ctx.fill()
-      ctx.strokeStyle = '#ff88aa'; ctx.lineWidth = 1.5; ctx.stroke()
+      ctx.fillStyle   = talking ? 'rgba(0,255,120,0.9)' : 'rgba(255,120,150,0.85)'
+      ctx.fill()
+      ctx.strokeStyle = talking ? '#00ff88' : '#ff88aa'
+      ctx.lineWidth   = 1.5; ctx.stroke()
+
       if (r > 5) {
-        ctx.fillStyle = '#fff'
-        ctx.font = `bold ${Math.max(8, r * 1.1)}px Inter,monospace`
-        ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'
+        ctx.fillStyle    = '#fff'
+        ctx.font         = `bold ${Math.max(8, r * 1.1)}px Inter,monospace`
+        ctx.textAlign    = 'center'; ctx.textBaseline = 'bottom'
+        ctx.shadowColor  = '#000'; ctx.shadowBlur = 3
         ctx.fillText(name, cx, cy - r - 2)
+        ctx.shadowBlur   = 0
       }
     })
   }
 
   _drawPlayer (ctx, pos) {
     const [cx, cy] = this._w2c(pos.x, pos.z)
-    const r = Math.max(6, this._wr(0.45))
-    const t = performance.now() / 600
-    const pulse = r + Math.sin(t) * r * 0.35
+    const r        = Math.max(6, this._wr(0.45))
+    const t        = performance.now() / 600
+    const pulse    = r + Math.sin(t) * r * 0.35
+    const selfTalk = this._talking?.has('self')
+    const now      = performance.now() / 1000
 
-    // Pulse ring
-    ctx.beginPath(); ctx.arc(cx, cy, pulse, 0, Math.PI * 2)
-    ctx.strokeStyle = 'rgba(0,255,255,0.25)'; ctx.lineWidth = 2; ctx.stroke()
+    if (selfTalk) {
+      // Green talking ring (overrides idle pulse)
+      const tp    = 0.5 + Math.sin(now * 6) * 0.5
+      const tRing = r + 5 + tp * 5
+      ctx.beginPath(); ctx.arc(cx, cy, tRing, 0, Math.PI * 2)
+      ctx.strokeStyle = `rgba(0,255,136,${0.7 + tp * 0.3})`
+      ctx.lineWidth   = 3
+      ctx.shadowColor = '#00ff88'; ctx.shadowBlur = 14
+      ctx.stroke(); ctx.shadowBlur = 0
+    } else {
+      // Normal idle pulse ring
+      ctx.beginPath(); ctx.arc(cx, cy, pulse, 0, Math.PI * 2)
+      ctx.strokeStyle = 'rgba(0,255,255,0.25)'; ctx.lineWidth = 2; ctx.stroke()
+    }
 
     // Outer glow
-    ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 10
+    ctx.shadowColor = selfTalk ? '#00ff88' : '#00ffff'; ctx.shadowBlur = 10
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2)
-    ctx.fillStyle = '#00e5ff'; ctx.fill()
+    ctx.fillStyle = selfTalk ? '#00ff88' : '#00e5ff'; ctx.fill()
     ctx.shadowBlur = 0
 
     // YOU label

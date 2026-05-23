@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { setupControls }                                        from './controls.js'
-import { createLocalAvatar, animateWalk, applyPreset, setAvatarStatus } from './avatar.js'
+import { createLocalAvatar, animateWalk, applyPreset, setAvatarStatus, setAvatarTalking } from './avatar.js'
 import { getZone, setFurnitureColliders }             from './collision.js'
 import { BLDG as B }                                  from '../scene/building.js'
 import { buildFurniture }                             from '../scene/furniture.js'
@@ -130,11 +130,13 @@ export function initPlayer (scene, camera, renderer, onZoneChange, onAvatarChang
     isDragMoved:  () => controls.isDragMoved(),
     getMode:      () => controls.getMode(),
     setView:      (m)    => { controls.setMode(m); applyModeVisibility(m) },
-    setStatus: (status)         => setAvatarStatus(avatar, status),
+    setStatus:  (status)          => setAvatarStatus(avatar, status),
+    setSelfTalking: (talking, clock) => setAvatarTalking(avatar, talking, clock),
+    setTalkingPeers: (talkingSet) => flatMap.setTalking(talkingSet),
     // Peer avatar tracking for the flat map
-    peerJoin:  (id, name)       => flatMap.setPeer(id, 0, 0, name),
-    peerMove:  (id, x, z, name) => flatMap.setPeer(id, x, z, name),
-    peerLeave: (id)             => flatMap.removePeer(id),
+    peerJoin:  (id, name)        => flatMap.setPeer(id, 0, 0, name),
+    peerMove:  (id, x, z, name)  => flatMap.setPeer(id, x, z, name),
+    peerLeave: (id)              => flatMap.removePeer(id),
   }
 }
 
