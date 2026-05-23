@@ -26,6 +26,17 @@ import { getIdentity } from '../identity/index.js'
 
 const APP_ID = 'spacework-v1'
 
+// Only the trackers that are confirmed live (WebSocket 101).
+// Using full redundancy ensures every peer hits every live tracker,
+// maximising the chance of mutual discovery even if one goes down.
+const TRACKERS = [
+  'wss://tracker.webtorrent.dev',
+  'wss://tracker.novage.com.ua',
+  'wss://tracker.openwebtorrent.com',
+  'wss://tracker.btorrent.xyz',
+  'wss://tracker.files.fm:7073/announce',
+]
+
 /**
  * Derive a stable, sanitised room ID from the current URL hash.
  * Falls back to 'main' if the hash is absent or empty.
@@ -72,7 +83,10 @@ export class RemoteSync {
 
   async start () {
     const roomId = deriveRoomId()
-    this.#room = joinRoom({ appId: APP_ID }, roomId)
+    this.#room = joinRoom(
+      { appId: APP_ID, relayConfig: { urls: TRACKERS, redundancy: TRACKERS.length } },
+      roomId,
+    )
 
     ;[this.#sendIntro,  this.#onIntro]  = this.#room.makeAction('intro')
     ;[this.#sendMove,   this.#onMove]   = this.#room.makeAction('move')
