@@ -1,8 +1,8 @@
 /**
  * SpaceSync — single multiplayer surface.
  *
- * Transport: Trystero WebRTC over BitTorrent DHT (cross-machine, serverless).
- * Room:      derived from URL hash — #team-alpha → room "sw-1-team-alpha".
+ * Transport: Nostr ephemeral events for WebRTC signaling (serverless).
+ * Room:      derived from URL hash — #team-alpha → room "sw-2-team-alpha".
  * Identity:  Ed25519 peerId from identity/index.js (stable across sessions).
  *
  * All peers in the same URL hash land in the same P2P swarm automatically.
