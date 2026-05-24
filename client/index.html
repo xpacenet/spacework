@@ -1007,32 +1007,32 @@
     <div id="lobby">
       <div class="lobby-glow"></div>
       <div class="lobby-card fade-in">
-        <span class="lobby-logo">Virtual Workspace</span>
+        <span class="lobby-logo">xpacenet · SpaceWork</span>
         <h1 class="lobby-title">SpaceWork</h1>
-        <p class="lobby-sub">A virtual office where your team lives,<br/>meets, and builds together.</p>
-        <div class="lobby-zones">
-          <span class="zone-chip bridge">Design</span>
-          <span class="zone-chip lab">Engineering</span>
-          <span class="zone-chip lounge">Ops</span>
-          <span class="zone-chip" style="background:rgba(68,255,170,0.15);color:#44ffaa;border:1px solid rgba(68,255,170,0.3)">Fun</span>
+
+        <!-- ── INVITED STATE (shown when URL has #xn_ encoded link) ─────── -->
+        <div id="lobby-invited" style="display:none;width:100%;text-align:center">
+          <div style="font-size:0.72rem;letter-spacing:0.1em;color:rgba(255,255,255,0.35);margin-bottom:6px">YOU WERE INVITED TO</div>
+          <div id="lobby-invited-room" style="font-size:1.3rem;font-weight:700;color:#0af;margin-bottom:4px"></div>
+          <div style="font-size:0.75rem;color:rgba(255,255,255,0.3);margin-bottom:16px">Private room · connection is end-to-end</div>
         </div>
 
-        <input class="lobby-input" id="username" type="text" placeholder="Your name" maxlength="20" autofocus />
-
-        <!-- Room name -->
-        <div class="lobby-room-row">
-          <input class="lobby-input lobby-input-room" id="room-name" type="text"
-            placeholder="Room name (default: main)" maxlength="40" autocomplete="off"
-            style="letter-spacing:0.04em;" />
-          <p class="connect-note" style="margin-top:4px">
-            Everyone with the same room name meets in the same space. Share the URL to invite teammates.
+        <!-- ── DEFAULT STATE (no link in URL) ────────────────────────────── -->
+        <div id="lobby-default" style="width:100%">
+          <p class="lobby-sub" style="margin-bottom:4px">
+            Create a room and share the link.<br/>
+            Everyone with the link meets in the same space.
           </p>
         </div>
 
-        <!-- Active rooms — populated by discoverActiveRooms() -->
-        <div id="active-rooms" style="display:none;width:100%">
-          <div class="lobby-active-label">ACTIVE NOW</div>
-          <div id="active-rooms-list"></div>
+        <!-- Name input — always shown -->
+        <input class="lobby-input" id="username" type="text" placeholder="Your name" maxlength="20" autofocus />
+
+        <!-- Room name — shown only in default state -->
+        <div class="lobby-room-row" id="lobby-room-row">
+          <input class="lobby-input lobby-input-room" id="room-name" type="text"
+            placeholder="Room name  (default: main)" maxlength="40" autocomplete="off"
+            style="letter-spacing:0.04em;" />
         </div>
 
         <!-- Avatar selection -->
@@ -1041,10 +1041,27 @@
           <div class="lobby-avatar-grid" id="lobby-avatar-grid"></div>
         </div>
 
-        <button class="lobby-btn" id="enter-btn">Enter Building →</button>
+        <!-- Active rooms — populated by discoverActiveRooms() -->
+        <div id="active-rooms" style="display:none;width:100%">
+          <div class="lobby-active-label">ACTIVE NOW</div>
+          <div id="active-rooms-list"></div>
+        </div>
+
+        <!-- CTA buttons -->
+        <!-- Invited state: single "Join Room" button -->
+        <button class="lobby-btn" id="enter-btn" style="display:none">Join Room →</button>
+
+        <!-- Default state: "Create Room" primary + "Enter" for named rooms -->
+        <div id="lobby-create-row" style="width:100%;display:flex;flex-direction:column;gap:10px">
+          <button class="lobby-btn" id="create-btn">+ Create Room</button>
+          <button class="lobby-btn" id="join-named-btn"
+            style="background:transparent;border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.6)">
+            Enter named room →
+          </button>
+        </div>
 
         <!-- Identity fingerprint + P2P status -->
-        <div style="margin-top:16px;display:flex;align-items:center;gap:8px;justify-content:center;font-size:0.68rem;color:rgba(255,255,255,0.4);letter-spacing:0.04em">
+        <div style="margin-top:8px;display:flex;align-items:center;gap:8px;justify-content:center;font-size:0.68rem;color:rgba(255,255,255,0.4);letter-spacing:0.04em">
           <div class="ipfs-dot green" id="ipfs-dot"></div>
           <span id="ipfs-label">P2P ready</span>
           <span id="id-fingerprint" style="color:rgba(255,255,255,0.25);font-family:monospace;margin-left:4px"></span>
@@ -1088,7 +1105,8 @@
       </div>
 
       <!-- Avatar picker button -->
-      <button id="avatar-btn" class="hud-side-btn" style="top:56px;right:auto;left:20px">🧑 Avatar</button>
+      <button id="avatar-btn"    class="hud-side-btn" style="top:56px;right:auto;left:20px">🧑 Avatar</button>
+      <button id="leave-room-btn" class="hud-side-btn" style="top:100px;right:auto;left:20px;border-color:rgba(255,80,80,0.3);color:rgba(255,120,120,0.8)">⬅ Leave</button>
 
       <!-- Right-side HUD buttons (stacked vertically) -->
       <button id="nm-open-btn"  class="hud-side-btn">🌐 Network</button>

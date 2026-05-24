@@ -177,10 +177,81 @@ import { WorldHistory }      from './universe/index.js'
     usernameInput.value = identity.displayName
   }
 
-  // ── Pre-fill room name from URL hash ────────────────────────────────────────
-  if (roomInput) roomInput.value = currentRoomName()
+  // ── Lobby state: detect invited vs default ───────────────────────────────────
+  ;(async () => {
+    const { parseCurrentLink } = await import('./sync/roomLink.js')
+    const link = await parseCurrentLink()
 
-  // ── Show identity fingerprint in lobby ──────────────────────────────────────
+    const invitedEl    = document.getElementById('lobby-invited')
+    const invitedRoom  = document.getElementById('lobby-invited-room')
+    const defaultEl    = document.getElementById('lobby-default')
+    const createRow    = document.getElementById('lobby-create-row')
+    const roomRow      = document.getElementById('lobby-room-row')
+    const createBtn    = document.getElementById('create-btn')
+    const joinNamedBtn = document.getElementById('join-named-btn')
+
+    if (link.type === 'link') {
+      // ── Invited via encoded link ─────────────────────────────────────────
+      invitedRoom.textContent = link.roomId
+      invitedEl.style.display   = 'block'
+      defaultEl.style.display   = 'none'
+      roomRow.style.display     = 'none'
+      createRow.style.display   = 'none'
+      enterBtn.style.display    = 'block'
+      enterBtn.textContent      = 'Join Room →'
+
+    } else if (link.type === 'plain') {
+      // ── Plain #room-name in URL ───────────────────────────────────────────
+      if (roomInput) roomInput.value = link.roomId
+      defaultEl.style.display  = 'none'
+      createRow.style.display  = 'none'
+      enterBtn.style.display   = 'block'
+      enterBtn.textContent     = `Enter ${link.roomId} →`
+
+    } else {
+      // ── No link — show Create / Join ─────────────────────────────────────
+      invitedEl.style.display  = 'none'
+    }
+
+    // Create room button
+    createBtn?.addEventListener('click', async () => {
+      const username = usernameInput.value.trim()
+      if (!username) { usernameInput.focus(); usernameInput.style.borderColor = '#f55'; return }
+      usernameInput.style.borderColor = ''
+
+      const roomName = roomInput?.value.trim() ||
+        `room-${Math.random().toString(36).slice(2, 7)}`
+      setRoomName(roomName)
+
+      // Generate and copy the invite link immediately
+      try {
+        const { createRoomLink: makeLink } = await import('./sync/roomLink.js')
+        const { link: inviteLink } = await makeLink({ roomId: roomName })
+        await navigator.clipboard.writeText(inviteLink).catch(() => {})
+      } catch { /* clipboard denied, not critical */ }
+
+      startBoarding(username)
+    })
+
+    // Join named room button
+    joinNamedBtn?.addEventListener('click', () => {
+      const username = usernameInput.value.trim()
+      if (!username) { usernameInput.focus(); usernameInput.style.borderColor = '#f55'; return }
+      usernameInput.style.borderColor = ''
+      const roomName = roomInput?.value.trim() || 'main'
+      setRoomName(roomName)
+      startBoarding(username)
+    })
+
+    enterBtn?.addEventListener('click', () => {
+      const username = usernameInput.value.trim()
+      if (!username) { usernameInput.focus(); usernameInput.style.borderColor = '#f55'; return }
+      usernameInput.style.borderColor = ''
+      startBoarding(username)
+    })
+  })()
+
+  // ── Show identity fingerprint ────────────────────────────────────────────────
   const idFingerprintEl = document.getElementById('id-fingerprint')
   if (idFingerprintEl) {
     idFingerprintEl.textContent = identity.isNew
@@ -250,25 +321,25 @@ import { WorldHistory }      from './universe/index.js'
   }).then(stop => { _stopDiscover = stop })
 
   // ── Enter key shortcuts ──────────────────────────────────────────────────────
-  usernameInput?.addEventListener('keydown', e => { if (e.key === 'Enter') startBoarding() })
-  roomInput?.addEventListener('keydown',    e => { if (e.key === 'Enter') startBoarding() })
-  enterBtn?.addEventListener('click', startBoarding)
+  usernameInput?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const u = usernameInput.value.trim()
+      if (u) startBoarding(u)
+    }
+  })
+  roomInput?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const u = usernameInput.value.trim()
+      if (u) startBoarding(u)
+    }
+  })
 
   // ── Board ─────────────────────────────────────────────────────────────────────
-  function startBoarding () {
-    const username = usernameInput.value.trim()
-    if (!username) {
-      usernameInput.focus()
-      usernameInput.style.borderColor = '#f55'
-      return
-    }
-    usernameInput.style.borderColor = ''
+  function startBoarding (username) {
+    if (!username) return
 
     // Persist display name in identity so it's pre-filled on next visit
     identity.setName(username)
-
-    // Set room from the input (updates URL hash — shareable link)
-    if (roomInput?.value.trim()) setRoomName(roomInput.value.trim())
 
     _stopDiscover?.(); _stopDiscover = null
 
@@ -668,6 +739,15 @@ import { WorldHistory }      from './universe/index.js'
       document.getElementById('nm-open-btn')?.addEventListener('click', e => {
         e.stopPropagation()
         openNetworkMap(swarmNet, visLayer, username)
+      })
+
+      // ── Leave room ────────────────────────────────────────────────────────────
+      document.getElementById('leave-room-btn')?.addEventListener('click', () => {
+        spaceSync.stop()
+        // Clear URL hash so lobby shows default (create/join) state
+        history.replaceState(null, '', window.location.pathname + window.location.search)
+        // Reload — cleanest way to reset all 3D state, audio, connections
+        window.location.reload()
       })
 
       // ── Invite modal ──────────────────────────────────────────────────────────
