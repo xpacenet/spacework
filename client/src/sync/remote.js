@@ -70,6 +70,7 @@ class XpaceNodePool {
   #url       = ''
   #handlers  = new Map()   // type → [cb]
   #ready     = false
+  #closed    = false       // true after explicit close() — suppresses reconnect
   #queue     = []          // messages buffered before connection opens
   #retries   = 0
 
@@ -125,7 +126,8 @@ class XpaceNodePool {
   }
 
   close () {
-    this.#ready = false
+    this.#closed = true    // prevent reconnect loop after intentional close
+    this.#ready  = false
     this.#ws?.close()
   }
 
@@ -135,9 +137,11 @@ class XpaceNodePool {
   }
 
   #reconnect () {
+    if (this.#closed) return    // explicit close — do not reconnect
     const delay = Math.min(1000 * 2 ** this.#retries++, 30_000)
     console.warn(`[xpacenode] disconnected — reconnecting in ${delay}ms`)
     setTimeout(() => {
+      if (this.#closed) return
       this.connect(this.#url).catch(() => { /* next retry handles it */ })
     }, delay)
   }
