@@ -1,1 +1,1 @@
-2026-05-24T10:00 room-discovery: active rooms in lobby + invite link button
+2026-05-24T11:00 fix: ignore stale heartbeats replayed by relays (90s cutoff)
