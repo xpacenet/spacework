@@ -14,6 +14,7 @@ import { PresencePanel }    from './ui/presencePanel.js'
 import { spaceSync }         from './sync/index.js'
 import { loadIdentity, getIdentity } from './identity/index.js'
 import { setRoomName, currentRoomName, discoverActiveRooms } from './sync/remote.js'
+import { createRoomLink } from './sync/roomLink.js'
 import { WorldHistory }      from './universe/index.js'
 
 // ── Bootstrap — load identity before anything else ────────────────────────────
@@ -564,17 +565,25 @@ import { WorldHistory }      from './universe/index.js'
         openNetworkMap(swarmNet, visLayer, username)
       })
 
-      document.getElementById('invite-btn')?.addEventListener('click', e => {
+      document.getElementById('invite-btn')?.addEventListener('click', async e => {
         e.stopPropagation()
-        const url = window.location.href
-        navigator.clipboard.writeText(url).then(() => {
-          const btn = document.getElementById('invite-btn')
+        const btn = document.getElementById('invite-btn')
+        try {
+          // Generate a gated link: encodes roomHash + preferred node + known peers
+          const nodeUrl = spaceSync.nodeUrl ?? undefined
+          const { link } = await createRoomLink({
+            roomId:   spaceSync.roomName,
+            lockCode: '',            // open room (no lock) — add UI for lock later
+            node:     nodeUrl,
+          })
+          await navigator.clipboard.writeText(link)
           const prev = btn.textContent
           btn.textContent = '✅ Copied!'
           setTimeout(() => { btn.textContent = prev }, 2000)
-        }).catch(() => {
-          prompt('Copy this link to invite someone:', url)
-        })
+        } catch {
+          // Fallback — plain URL
+          prompt('Copy this link to invite someone:', window.location.href)
+        }
       })
 
       // ── Mobile bottom bar wiring ─────────────────────────────────────────────

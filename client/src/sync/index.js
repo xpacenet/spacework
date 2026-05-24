@@ -34,6 +34,12 @@ export class SpaceSync extends EventTarget {
   get peers ()     { return [...this.#peers.values()] }
   get peerCount () { return this.#peers.size }
 
+  /** Human-readable room name (for display / invite link generation) */
+  get roomName ()  { return this.#remote?.roomName ?? 'main' }
+
+  /** The xpacenode URL this session is using */
+  get nodeUrl ()   { return this.#remote?.nodeUrl  ?? null }
+
   async start (username, presetId = 0, status = 'available') {
     if (this.#started) return
     this.#started  = true

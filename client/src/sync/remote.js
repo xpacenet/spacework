@@ -20,35 +20,55 @@
  */
 
 import { getIdentity } from '../identity/index.js'
+import {
+  parseCurrentLink,
+  createRoomLink,
+  recordPeer,
+  setRoomNameInUrl,
+} from './roomLink.js'
 
 // ── xpacenode URL ─────────────────────────────────────────────────────────────
-function resolveNodeUrl () {
-  // 1. URL query param — lets invite links carry a specific node
+function resolveNodeUrl (linkNode) {
+  // 1. Node encoded in the room link (highest priority — portable invite)
+  if (linkNode) return linkNode
+
+  // 2. URL query param ?node=
   const urlParam = new URLSearchParams(window.location.search).get('node')
   if (urlParam) return urlParam
 
-  // 2. Build-time env var (set VITE_XPACENODE_URL in .env)
+  // 3. Build-time env var (set VITE_XPACENODE_URL in .env)
   if (import.meta.env?.VITE_XPACENODE_URL) return import.meta.env.VITE_XPACENODE_URL
 
-  // 3. Local dev fallback
+  // 4. Local dev fallback
   return 'ws://localhost:4002'
 }
 
-// ── Room ID helpers (same public API as v1/v2) ────────────────────────────────
+// ── Room helpers (public API — re-exported for main.js / lobby) ───────────────
 
-export function deriveRoomId () {
-  const raw  = window.location.hash.slice(1).trim().toLowerCase()
-  const slug = raw.replace(/[^a-z0-9-]/g, '-').replace(/-{2,}/g, '-').slice(0, 40) || 'main'
-  return slug
-}
-
+/** Current room display name (human-readable, not the hash) */
 export function currentRoomName () {
-  return window.location.hash.slice(1).trim() || 'main'
+  const raw = window.location.hash.slice(1).trim()
+  if (!raw || raw.startsWith('xn_')) return 'main'
+  return raw
 }
 
-export function setRoomName (name) {
-  const slug = name.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-{2,}/g, '-') || 'main'
-  window.location.hash = slug
+/** Set a plain room name in the URL (lobby text-input flow) */
+export function setRoomName (name) { setRoomNameInUrl(name) }
+
+/**
+ * Generate a shareable gated room link.
+ * lockCode is optional — omit for an open (unlocked) room.
+ */
+export { createRoomLink }
+
+/**
+ * Legacy: derive a plain room slug from the URL hash.
+ * Still used internally before async link parsing is complete.
+ */
+export function deriveRoomId () {
+  const raw = window.location.hash.slice(1).trim().toLowerCase()
+  if (!raw || raw.startsWith('xn_')) return 'main'
+  return raw.replace(/[^a-z0-9-]/g, '-').replace(/-{2,}/g, '-').slice(0, 40) || 'main'
 }
 
 // ── ICE servers (STUN public + open TURN relay) ───────────────────────────────
@@ -293,7 +313,10 @@ export class RemoteSync {
   #username       = ''
   #presetId       = 0
   #status         = 'available'
-  #roomId         = ''
+  #roomId         = ''          // room hash (sent to xpacenode)
+  #roomName       = 'main'      // human-readable name (display only)
+  #nodeUrl        = ''          // the xpacenode URL in use
+  #knownPeers     = []          // peer IDs from previous sessions
   #voiceCb        = null
   #pendingTracks  = []
   #localTracks    = []
@@ -306,12 +329,17 @@ export class RemoteSync {
   }
 
   async start () {
-    this.#roomId = deriveRoomId()
-    this.#pool   = new XpaceNodePool()
+    // Parse the room link — resolves hash from xn_ encoded link or plain name
+    const link      = await parseCurrentLink()
+    this.#roomId    = link.roomHash      // xpacenode only ever sees the hash
+    this.#roomName  = link.roomId        // human-readable, for display only
+    this.#knownPeers = link.peers ?? []
 
-    const nodeUrl = resolveNodeUrl()
-    console.log('[RemoteSync] connecting to xpacenode:', nodeUrl)
-    await this.#pool.connect(nodeUrl)
+    this.#pool = new XpaceNodePool()
+
+    this.#nodeUrl = resolveNodeUrl(link.node)
+    console.log(`[RemoteSync] room:"${this.#roomName}" hash:${this.#roomId.slice(0,12)}… node:${this.#nodeUrl}`)
+    await this.#pool.connect(this.#nodeUrl)
 
     // ── Peer join ────────────────────────────────────────────────────────
     this.#pool.on('peer_join', async msg => {
@@ -396,7 +424,7 @@ export class RemoteSync {
       }
     })
 
-    // Data channel open → send intro
+    // Data channel open → send intro + record this peer for future direct connections
     peer.addEventListener('open', () => {
       peer.send({
         type:       'intro',
@@ -405,6 +433,7 @@ export class RemoteSync {
         presetId:   this.#presetId,
         status:     this.#status,
       })
+      recordPeer(this.#roomId, peerId)
     })
 
     // Connection failed → tear down
@@ -511,6 +540,15 @@ export class RemoteSync {
   }
 
   wireToIdentityId (peerId) { return peerId }
+
+  /** Human-readable room name (for display in HUD) */
+  get roomName () { return this.#roomName }
+
+  /** Room hash (the actual xpacenode topic — never the plain name) */
+  get roomHash () { return this.#roomId }
+
+  /** The xpacenode URL this session connected to */
+  get nodeUrl ()  { return this.#nodeUrl }
 
   getPeers () {
     const out = {}
