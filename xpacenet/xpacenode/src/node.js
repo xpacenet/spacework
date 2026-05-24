@@ -117,7 +117,7 @@ async function loadOrCreateKey (keyFile) {
   }
 
   const key = await generateKeyPair('Ed25519')
-  await writeFile(keyFile, Buffer.from(key.raw))
+  await writeFile(keyFile, Buffer.from(key.raw))   // 64 bytes (Ed25519 priv+pub)
   console.log('[node] generated new identity, saved to', keyFile)
   return key
 }
