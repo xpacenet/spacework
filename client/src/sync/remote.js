@@ -662,7 +662,10 @@ export async function discoverActiveRooms (onUpdate) {
     kinds: [20001],
     '#r': ['sw-2-_discover'],
     '#t': ['heartbeat'],
+    since: Math.floor(Date.now() / 1000) - 90,   // ignore heartbeats older than 90 s
   }, event => {
+    // Relays may replay stored events — drop anything older than 90 s
+    if (Date.now() / 1000 - event.created_at > 90) return
     try {
       const { roomId, roomName, username } = JSON.parse(event.content)
       if (!roomId) return
