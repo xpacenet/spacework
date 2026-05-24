@@ -11,11 +11,82 @@ import { VisibilityLayer, VISIBILITY } from './network/visibility.js'
 import { openNetworkMap }    from './ui/networkMap.js'
 import { ProximityVoice }   from './ui/proximityVoice.js'
 import { PresencePanel }    from './ui/presencePanel.js'
-import { spaceSync }         from './sync/index.js'
+import { spaceSync, connLog } from './sync/index.js'
 import { loadIdentity, getIdentity } from './identity/index.js'
 import { setRoomName, currentRoomName, discoverActiveRooms } from './sync/remote.js'
 import { createRoomLink } from './sync/roomLink.js'
 import { WorldHistory }      from './universe/index.js'
+
+// ── Connection log UI ─────────────────────────────────────────────────────────
+;(() => {
+  const panel    = document.getElementById('conn-log')
+  const body     = document.getElementById('conn-log-body')
+  const title    = document.getElementById('conn-log-title')
+  const toggle   = document.getElementById('conn-log-toggle')
+  const dismiss  = document.getElementById('conn-log-dismiss')
+  if (!panel) return
+
+  const ICONS = { pending: '⏳', ok: '✅', fail: '❌', warn: '⚠️', info: '·' }
+  const stepEls = new Map()   // stepId → DOM element
+
+  const show = () => panel.classList.remove('hidden')
+  const hide = () => panel.classList.add('hidden')
+
+  connLog.addEventListener('step', ({ detail: step }) => {
+    show()
+
+    if (step.action === 'add') {
+      const el = document.createElement('div')
+      el.className = `cl-step ${step.status}`
+      el.innerHTML = `
+        <span class="cl-icon">${ICONS[step.status] ?? '·'}</span>
+        <div>
+          <div class="cl-text">${step.text}</div>
+          ${step.detail ? `<div class="cl-detail">${step.detail}</div>` : ''}
+        </div>`
+      body.appendChild(el)
+      stepEls.set(step.id, el)
+      body.scrollTop = body.scrollHeight
+    } else {
+      // update existing
+      const el = stepEls.get(step.id)
+      if (!el) return
+      el.className = `cl-step ${step.status}`
+      el.querySelector('.cl-icon').textContent = ICONS[step.status] ?? '·'
+      if (step.detail) {
+        let d = el.querySelector('.cl-detail')
+        if (!d) { d = document.createElement('div'); d.className = 'cl-detail'; el.querySelector('.cl-text').after(d) }
+        d.textContent = step.detail
+      }
+    }
+
+    // Update header title
+    const last = connLog.steps.at(-1)
+    if (last) title.textContent = `⬡ ${last.text}`
+  })
+
+  connLog.addEventListener('clear', () => {
+    body.innerHTML = ''
+    stepEls.clear()
+  })
+
+  // Collapse / expand
+  let collapsed = false
+  document.getElementById('conn-log-header')?.addEventListener('click', () => {
+    collapsed = !collapsed
+    body.classList.toggle('collapsed', collapsed)
+    toggle.textContent = collapsed ? '▼' : '▲'
+  })
+
+  dismiss?.addEventListener('click', hide)
+
+  // Auto-dismiss 6s after a peer connects
+  spaceSync.addEventListener('peer:join', () => {
+    title.textContent = '⬡ Connected'
+    setTimeout(hide, 6000)
+  })
+})()
+
 
 // ── Bootstrap — load identity before anything else ────────────────────────────
 ;(async () => {

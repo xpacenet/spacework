@@ -26,21 +26,23 @@ import {
   recordPeer,
   setRoomNameInUrl,
 } from './roomLink.js'
+import { connLog } from './connectionLog.js'
 
 // ── xpacenode URL ─────────────────────────────────────────────────────────────
+// Returns null if no node is configured — triggers DHT fallback in SpaceSync.
 function resolveNodeUrl (linkNode) {
-  // 1. Node encoded in the room link (highest priority — portable invite)
+  // 1. Node encoded in the room link
   if (linkNode) return linkNode
 
   // 2. URL query param ?node=
   const urlParam = new URLSearchParams(window.location.search).get('node')
   if (urlParam) return urlParam
 
-  // 3. Build-time env var (set VITE_XPACENODE_URL in .env)
+  // 3. Build-time env var
   if (import.meta.env?.VITE_XPACENODE_URL) return import.meta.env.VITE_XPACENODE_URL
 
-  // 4. Local dev fallback
-  return 'ws://localhost:4002'
+  // 4. null → caller falls back to DHT
+  return null
 }
 
 // ── Room helpers (public API — re-exported for main.js / lobby) ───────────────
@@ -330,26 +332,48 @@ export class RemoteSync {
 
   async start () {
     // Parse the room link — resolves hash from xn_ encoded link or plain name
+    const roomStep  = connLog.push('Resolving room…')
     const link      = await parseCurrentLink()
-    this.#roomId    = link.roomHash      // xpacenode only ever sees the hash
-    this.#roomName  = link.roomId        // human-readable, for display only
+    this.#roomId    = link.roomHash
+    this.#roomName  = link.roomId
     this.#knownPeers = link.peers ?? []
+    connLog.ok(roomStep, `Room: ${this.#roomName}`)
+
+    // Check known peers
+    if (this.#knownPeers.length) {
+      connLog.info(`Found ${this.#knownPeers.length} known peer${this.#knownPeers.length > 1 ? 's' : ''} from previous session`)
+    }
+
+    this.#nodeUrl = resolveNodeUrl(link.node)
+
+    if (!this.#nodeUrl) {
+      // Signal back to SpaceSync that we should use DHT instead
+      throw Object.assign(new Error('NO_NODE'), { roomHash: this.#roomId, roomName: this.#roomName })
+    }
 
     this.#pool = new XpaceNodePool()
 
-    this.#nodeUrl = resolveNodeUrl(link.node)
+    const nodeStep = connLog.push(`Connecting to xpacenode…`, 'pending', this.#nodeUrl)
     console.log(`[RemoteSync] room:"${this.#roomName}" hash:${this.#roomId.slice(0,12)}… node:${this.#nodeUrl}`)
-    await this.#pool.connect(this.#nodeUrl)
+    try {
+      await this.#pool.connect(this.#nodeUrl)
+      connLog.ok(nodeStep, this.#nodeUrl)
+    } catch (err) {
+      connLog.fail(nodeStep, 'Could not reach xpacenode')
+      throw err
+    }
+
+    connLog.info('Waiting for peers in room…')
 
     // ── Peer join ────────────────────────────────────────────────────────
     this.#pool.on('peer_join', async msg => {
       const { peerId, username = '', presetId = 0, status = 'available' } = msg
       if (peerId === this.#selfId()) return
 
+      connLog.info(`Peer found: ${username || peerId.slice(0, 10)}…`)
       this.#fire('HELLO', { from: peerId, username, presetId, status })
 
       if (!this.#peers.has(peerId)) {
-        // Polite peer = lower string value (deterministic tie-break)
         const isPolite = this.#selfId() < peerId
         await this.#createPeer(peerId, isPolite)
       }

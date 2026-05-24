@@ -18,8 +18,11 @@
  *   status       detail: { peerCount }
  */
 
-import { RemoteSync }  from './remote.js'
-import { getIdentity } from '../identity/index.js'
+import { RemoteSync }   from './remote.js'
+import { TrysteroSync } from './trysteroSync.js'
+import { getIdentity }  from '../identity/index.js'
+import { connLog }      from './connectionLog.js'
+export { connLog }
 
 export class SpaceSync extends EventTarget {
   #remote   = null
@@ -47,43 +50,57 @@ export class SpaceSync extends EventTarget {
     this.#presetId = presetId
     this.#status   = status
 
-    this.#remote = new RemoteSync(username, presetId, status)
+    // Try xpacenode first — fall back to BitTorrent DHT if not configured/reachable
+    let remote
+    try {
+      remote = new RemoteSync(username, presetId, status)
+      await remote.start()
+    } catch (err) {
+      if (err?.message === 'NO_NODE') {
+        connLog.info('No xpacenode configured — using BitTorrent DHT (serverless)')
+        remote = new TrysteroSync(username, presetId, status)
+        await remote.start(err.roomHash, err.roomName)
+      } else {
+        connLog.info('xpacenode unreachable — falling back to BitTorrent DHT')
+        const { parseCurrentLink } = await import('./roomLink.js')
+        const link = await parseCurrentLink()
+        remote = new TrysteroSync(username, presetId, status)
+        await remote.start(link.roomHash, link.roomId)
+      }
+    }
+    this.#remote = remote
+    this.#wireListeners()
+  }
 
-    // ── Peer discovered ──────────────────────────────────────────────────────
-    this.#remote.on('HELLO', ({ from, username: u, presetId: pid = 0, status: st = 'available' }) => {
+  #wireListeners () {
+    const r = this.#remote
+
+    r.on('HELLO', ({ from, username: u, presetId: pid = 0, status: st = 'available' }) => {
       if (this.#peers.has(from)) return
       this.#addPeer(from, u, pid, st)
     })
 
-    // ── Peer left ────────────────────────────────────────────────────────────
-    this.#remote.on('PEER_LEAVE', ({ from }) => this.#removePeer(from))
+    r.on('PEER_LEAVE', ({ from }) => this.#removePeer(from))
 
-    // ── Position update ───────────────────────────────────────────────────────
-    this.#remote.on('MOVE', ({ from, pos }) => {
+    r.on('MOVE', ({ from, pos }) => {
       this.#emit('peer:move', { peerId: from, pos })
     })
 
-    // ── Avatar change ─────────────────────────────────────────────────────────
-    this.#remote.on('AVATAR_CHANGE', ({ from, presetId: pid }) => {
+    r.on('AVATAR_CHANGE', ({ from, presetId: pid }) => {
       this.#emit('peer:avatar', { peerId: from, presetId: pid })
     })
 
-    // ── Status change ─────────────────────────────────────────────────────────
-    this.#remote.on('STATUS_CHANGE', ({ from, status: st }) => {
+    r.on('STATUS_CHANGE', ({ from, status: st }) => {
       this.#emit('peer:status', { peerId: from, status: st })
     })
 
-    // ── Peer talking (data-channel broadcast) ────────────────────────────────
-    this.#remote.on('PEER_TALKING', ({ from, talking }) => {
+    r.on('PEER_TALKING', ({ from, talking }) => {
       this.#emit('peer:talking', { peerId: from, talking })
     })
 
-    // ── Chat ──────────────────────────────────────────────────────────────────
-    this.#remote.on('CHAT', ({ from, username: u, text, ts }) => {
+    r.on('CHAT', ({ from, username: u, text, ts }) => {
       this.#emit('chat', { from, username: u, text, ts })
     })
-
-    await this.#remote.start()
   }
 
   stop () {
