@@ -1,1 +1,1 @@
-2026-05-24T12:00 fix: audio silent — re-keying bug + spawn-distance kills gain
+2026-05-24T13:00 fix: 3D ring z-fight + pending track buffer + AudioContext resume on track
