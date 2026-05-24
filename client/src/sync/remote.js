@@ -331,24 +331,45 @@ export class RemoteSync {
   }
 
   async start () {
-    // Parse the room link — resolves hash from xn_ encoded link or plain name
-    const roomStep  = connLog.push('Resolving room…')
-    const link      = await parseCurrentLink()
-    this.#roomId    = link.roomHash
-    this.#roomName  = link.roomId
-    this.#knownPeers = link.peers ?? []
-    connLog.ok(roomStep, `Room: ${this.#roomName}`)
+    // ── Step 1: decode the link ───────────────────────────────────────────────
+    const roomStep = connLog.push('Reading link…')
+    const link     = await parseCurrentLink()
 
-    // Check known peers
-    if (this.#knownPeers.length) {
-      connLog.info(`Found ${this.#knownPeers.length} known peer${this.#knownPeers.length > 1 ? 's' : ''} from previous session`)
+    this.#roomId     = link.roomHash
+    this.#roomName   = link.roomId
+    this.#knownPeers = link.peers ?? []
+
+    if (link.type === 'link') {
+      // Encoded xn_ invite link — show what was decoded
+      connLog.ok(roomStep, `Invite link decoded → room: ${this.#roomName}`)
+      connLog.info('Room address is hashed — connection is private')
+      if (link.node) {
+        connLog.info(`Preferred node found in link`, link.node)
+      }
+    } else if (link.type === 'plain') {
+      connLog.ok(roomStep, `Room: ${this.#roomName}`)
+    } else {
+      connLog.ok(roomStep, 'Using default room')
     }
 
+    // ── Step 2: known peers from link or cache ────────────────────────────────
+    if (this.#knownPeers.length) {
+      const src = link.type === 'link' ? 'invite link' : 'previous session'
+      connLog.info(
+        `${this.#knownPeers.length} known peer${this.#knownPeers.length > 1 ? 's' : ''} from ${src} — will try direct connections first`
+      )
+    }
+
+    // ── Step 3: resolve signaling node ───────────────────────────────────────
     this.#nodeUrl = resolveNodeUrl(link.node)
 
     if (!this.#nodeUrl) {
-      // Signal back to SpaceSync that we should use DHT instead
-      throw Object.assign(new Error('NO_NODE'), { roomHash: this.#roomId, roomName: this.#roomName })
+      connLog.info('No xpacenode configured — will use BitTorrent DHT')
+      throw Object.assign(new Error('NO_NODE'), {
+        roomHash: this.#roomId,
+        roomName: this.#roomName,
+        linkType: link.type,
+      })
     }
 
     this.#pool = new XpaceNodePool()

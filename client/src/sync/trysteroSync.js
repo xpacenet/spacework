@@ -51,9 +51,13 @@ export class TrysteroSync {
     this.#status   = status
   }
 
-  async start (roomHash, roomName) {
+  async start (roomHash, roomName, linkType = 'default') {
     this.#roomId   = roomHash
     this.#roomName = roomName
+
+    if (linkType === 'link') {
+      connLog.info('Invite link decoded — using hashed room address')
+    }
 
     const dhtId = connLog.push('Starting BitTorrent DHT discovery…')
 
