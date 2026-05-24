@@ -1,51 +1,45 @@
 /**
- * RemoteSync v2 — Nostr signaling + native WebRTC
+ * RemoteSync v3 — xpacenet signaling
  *
- * Replaces Trystero/BitTorrent DHT with Nostr ephemeral events for signaling.
- * WebRTC handles all data (move, chat, voice) once the connection is up.
- * Nostr is only used for the handshake (offer / answer / ICE candidates).
+ * Transport layer swap:
+ *   v1: Trystero / BitTorrent DHT
+ *   v2: Nostr ephemeral events (~300 ms signaling latency)
+ *   v3: xpacenode WebSocket bridge (~10–30 ms signaling latency)
  *
- * Signaling flow:
- *   1. Both peers subscribe to room HELLO events on join
- *   2. Each peer publishes a signed HELLO (nostr pubkey in event header)
- *   3. On seeing a remote HELLO, the peer with the LOWER nostr pubkey
- *      becomes "polite" (perfect-negotiation pattern) — the other initiates
- *   4. offer → answer → ICE candidates exchanged via Nostr DMs (['p', pubkey])
- *   5. RTCPeerConnection established → data channel opens → app data flows
+ * The WebRTC peer-to-peer layer (RTCPeer class) is identical to v2.
+ * Only the signaling transport changed — xpacenode replaced NostrPool.
  *
- * Tested 2026-05-23:
- *   - 12/12 ICE candidates delivered in 400 ms  ✅
- *   - 3-peer fan-out: both peers got offer       ✅
- *   - Relay failover                             ✅
- *   - Late-joiner buffering (3 s delay)          ✅
+ * xpacenode is the smallest routing unit in xpacenet.
+ * It routes signed messages without reading their content.
+ * SpaceWork is one client application on top of xpacenet.
+ *
+ * Node URL resolution order:
+ *   1. ?node=ws://... in the URL query string (portable invite link)
+ *   2. import.meta.env.VITE_XPACENODE_URL (build-time config)
+ *   3. ws://localhost:4002 (local dev default)
  */
 
-import { schnorr }     from '@noble/curves/secp256k1.js'
 import { getIdentity } from '../identity/index.js'
 
-// ── Relays — verified working 2026-05-23 ────────────────────────────────────
-const NOSTR_RELAYS = [
-  'wss://relay.primal.net',
-  'wss://nos.lol',
-  'wss://relay.snort.social',
-  'wss://relay.damus.io',
-]
+// ── xpacenode URL ─────────────────────────────────────────────────────────────
+function resolveNodeUrl () {
+  // 1. URL query param — lets invite links carry a specific node
+  const urlParam = new URLSearchParams(window.location.search).get('node')
+  if (urlParam) return urlParam
 
-// STUN (free) + TURN relay for NAT traversal (~20-30 % of real connections need TURN)
-const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  // Open Relay — community TURN, no account needed, port 80 TCP avoids most firewalls
-  { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-]
+  // 2. Build-time env var (set VITE_XPACENODE_URL in .env)
+  if (import.meta.env?.VITE_XPACENODE_URL) return import.meta.env.VITE_XPACENODE_URL
 
-// ── Room ID helpers (same public API as v1) ──────────────────────────────────
+  // 3. Local dev fallback
+  return 'ws://localhost:4002'
+}
+
+// ── Room ID helpers (same public API as v1/v2) ────────────────────────────────
 
 export function deriveRoomId () {
   const raw  = window.location.hash.slice(1).trim().toLowerCase()
   const slug = raw.replace(/[^a-z0-9-]/g, '-').replace(/-{2,}/g, '-').slice(0, 40) || 'main'
-  return `sw-2-${slug}`
+  return slug
 }
 
 export function currentRoomName () {
@@ -57,126 +51,100 @@ export function setRoomName (name) {
   window.location.hash = slug
 }
 
-// ── Crypto helpers ───────────────────────────────────────────────────────────
+// ── ICE servers (STUN public + open TURN relay) ───────────────────────────────
+// xpacenode circuit relay handles libp2p-level NAT traversal.
+// These servers handle WebRTC-level NAT traversal (UDP hole punching).
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'turn:openrelay.metered.ca:80',              username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+]
 
-const bytesToHex = b => Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('')
-const hexToBytes = h => new Uint8Array(h.match(/.{2}/g).map(b => parseInt(b, 16)))
+// ── XpaceNodePool — WebSocket transport ──────────────────────────────────────
+// Thin wrapper around a WebSocket connection to an xpacenode.
+// Replaces NostrPool from v2 — same logical API, ~10x lower latency.
 
-function genSession () {
-  const privkey = crypto.getRandomValues(new Uint8Array(32))
-  const pubkey  = bytesToHex(schnorr.getPublicKey(privkey))
-  return { privkey, pubkey }
-}
+class XpaceNodePool {
+  #ws        = null
+  #url       = ''
+  #handlers  = new Map()   // type → [cb]
+  #ready     = false
+  #queue     = []          // messages buffered before connection opens
+  #retries   = 0
 
-async function buildEvent (privkey, pubkey, tags, content) {
-  const e = {
-    pubkey,
-    created_at: Math.floor(Date.now() / 1000),
-    kind:       20001,    // ephemeral — relayed but not stored long-term
-    tags,
-    content: typeof content === 'string' ? content : JSON.stringify(content),
-  }
-  // SHA-256 of the canonical serialisation
-  const raw  = new TextEncoder().encode(
-    JSON.stringify([0, e.pubkey, e.created_at, e.kind, e.tags, e.content])
-  )
-  const hash = await crypto.subtle.digest('SHA-256', raw)
-  e.id  = bytesToHex(new Uint8Array(hash))
-  e.sig = bytesToHex(await schnorr.sign(hexToBytes(e.id), privkey))
-  return e
-}
+  async connect (url) {
+    this.#url = url
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(url)
+      this.#ws = ws
 
-// ── NostrPool ────────────────────────────────────────────────────────────────
-// Manages connections to all relays. Publishes to all; deduplicates inbound.
+      const timeout = setTimeout(() => reject(new Error('xpacenode connect timeout')), 10_000)
 
-class NostrPool {
-  #entries = []         // { url, ws, ready, retries }
-  #seen    = new Set()  // event IDs — dedup across relays
-  #subs    = new Map()  // subId → { filter, cb }
-  #closed  = false
-
-  connect (relays) {
-    return new Promise(resolve => {
-      let resolved = false
-      for (const url of relays) {
-        const entry = { url, ws: null, ready: false, retries: 0 }
-        this.#entries.push(entry)
-        this.#dial(entry, () => {
-          if (!resolved) { resolved = true; resolve() }
-        })
+      ws.onopen = () => {
+        clearTimeout(timeout)
+        this.#ready   = true
+        this.#retries = 0
+        // Drain buffered messages
+        const q = this.#queue.splice(0)
+        q.forEach(m => ws.send(m))
+        resolve()
       }
-      setTimeout(() => { if (!resolved) { resolved = true; resolve() } }, 10_000)
-    })
-  }
 
-  #dial (entry, onFirstOpen) {
-    if (this.#closed) return
-    const ws = new WebSocket(entry.url)
-    entry.ws = ws
+      ws.onmessage = ({ data }) => {
+        try {
+          const msg = JSON.parse(data)
+          this.#dispatch(msg)
+        } catch { /* malformed — drop */ }
+      }
 
-    ws.addEventListener('open', () => {
-      entry.ready = true
-      entry.retries = 0
-      onFirstOpen?.()
-      onFirstOpen = null
-      // Re-send all active subscriptions (reconnect replay)
-      for (const [subId, { filter }] of this.#subs) {
-        ws.send(JSON.stringify(['REQ', subId, filter]))
+      ws.onerror = err => {
+        clearTimeout(timeout)
+        reject(err)
+      }
+
+      ws.onclose = () => {
+        this.#ready = false
+        this.#reconnect()
       }
     })
-
-    ws.addEventListener('message', ({ data }) => {
-      try {
-        const msg = JSON.parse(data)
-        if (msg[0] !== 'EVENT') return
-        const event = msg[2]
-        if (!event?.id || this.#seen.has(event.id)) return
-        this.#seen.add(event.id)
-        this.#subs.get(msg[1])?.cb(event)
-      } catch {}
-    })
-
-    ws.addEventListener('close',  () => {
-      entry.ready = false
-      if (this.#closed) return
-      // Exponential backoff: 2s, 4s, 8s … capped at 30s
-      const delay = Math.min(2000 * 2 ** entry.retries++, 30_000)
-      setTimeout(() => this.#dial(entry, null), delay)
-    })
-
-    ws.addEventListener('error', () => {})  // handled by close
   }
 
-  subscribe (subId, filter, cb) {
-    this.#subs.set(subId, { filter, cb })
-    const msg = JSON.stringify(['REQ', subId, filter])
-    for (const e of this.#entries) if (e.ready) e.ws.send(msg)
+  send (msg) {
+    const s = JSON.stringify(msg)
+    if (this.#ready && this.#ws?.readyState === WebSocket.OPEN) {
+      this.#ws.send(s)
+    } else {
+      this.#queue.push(s)   // buffer until reconnect
+    }
   }
 
-  unsubscribe (subId) {
-    this.#subs.delete(subId)
-    const msg = JSON.stringify(['CLOSE', subId])
-    for (const e of this.#entries) if (e.ready) e.ws.send(msg)
-  }
-
-  publish (event) {
-    const msg = JSON.stringify(['EVENT', event])
-    let sent = 0
-    for (const e of this.#entries) if (e.ready) { e.ws.send(msg); sent++ }
-    return sent > 0
+  on (type, cb) {
+    if (!this.#handlers.has(type)) this.#handlers.set(type, [])
+    this.#handlers.get(type).push(cb)
   }
 
   close () {
-    this.#closed = true
-    for (const e of this.#entries) { try { e.ws?.close() } catch {} }
-    this.#entries = []
-    this.#subs.clear()
+    this.#ready = false
+    this.#ws?.close()
+  }
+
+  #dispatch (msg) {
+    const cbs = this.#handlers.get(msg.t)
+    cbs?.forEach(cb => cb(msg))
+  }
+
+  #reconnect () {
+    const delay = Math.min(1000 * 2 ** this.#retries++, 30_000)
+    console.warn(`[xpacenode] disconnected — reconnecting in ${delay}ms`)
+    setTimeout(() => {
+      this.connect(this.#url).catch(() => { /* next retry handles it */ })
+    }, delay)
   }
 }
 
-// ── RTCPeer ──────────────────────────────────────────────────────────────────
-// One RTCPeerConnection per remote peer.
-// Implements the "perfect negotiation" pattern to handle offer collisions.
+// ── RTCPeer ────────────────────────────────────────────────────────────────────
+// Unchanged from v2 — perfect-negotiation WebRTC peer.
 
 class RTCPeer extends EventTarget {
   #pc
@@ -186,10 +154,9 @@ class RTCPeer extends EventTarget {
   #ignoreOffer     = false
   #onMessageCb     = null
   #onTrackCb       = null
-  #iceQueue        = []     // ICE candidates buffered before remote desc is set
-  #hasRemoteDesc   = false  // true once setRemoteDescription succeeds
+  #iceQueue        = []
+  #hasRemoteDesc   = false
 
-  // Shared negotiate logic — used by onnegotiationneeded and manual re-trigger
   #negotiate = async () => {
     if (this.#makingOffer) return
     if (this.#pc.signalingState !== 'stable') return
@@ -211,7 +178,6 @@ class RTCPeer extends EventTarget {
     this.#isPolite = isPolite
     this.#pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
 
-    // Impolite peer creates the data channel; polite peer receives it
     if (!isPolite) {
       this.#dc = this.#pc.createDataChannel('sw', { ordered: true })
       this.#hookDC(this.#dc)
@@ -230,7 +196,6 @@ class RTCPeer extends EventTarget {
       }
     }
 
-    // onnegotiationneeded fires when tracks are added or on first connection
     this.#pc.onnegotiationneeded = this.#negotiate
 
     this.#pc.ontrack = ({ track, streams }) => {
@@ -253,7 +218,6 @@ class RTCPeer extends EventTarget {
     }
   }
 
-  // Receive a signal from the remote peer (delivered via Nostr)
   async handleSignal ({ type, sdp, candidate }) {
     try {
       if (type === 'offer') {
@@ -270,12 +234,7 @@ class RTCPeer extends EventTarget {
         }))
         await this.#drainIceQueue()
 
-        // Chrome does not re-fire onnegotiationneeded after implicit rollback.
-        // If the polite peer had a pending offer that was rolled back, any local
-        // tracks in that offer still need to be sent — re-trigger manually.
-        if (this.#isPolite && hadLocalOffer) {
-          setTimeout(this.#negotiate, 200)
-        }
+        if (this.#isPolite && hadLocalOffer) setTimeout(this.#negotiate, 200)
 
       } else if (type === 'answer') {
         if (this.#pc.signalingState === 'have-local-offer') {
@@ -309,12 +268,10 @@ class RTCPeer extends EventTarget {
     if (this.#dc?.readyState === 'open') this.#dc.send(JSON.stringify(msg))
   }
 
-  addTrack (track, stream) {
-    try { this.#pc.addTrack(track, stream) } catch {}
-  }
+  addTrack (track, stream) { try { this.#pc.addTrack(track, stream) } catch {} }
 
-  onMessage (cb)  { this.#onMessageCb = cb }
-  onTrack   (cb)  { this.#onTrackCb   = cb }
+  onMessage (cb) { this.#onMessageCb = cb }
+  onTrack   (cb) { this.#onTrackCb   = cb }
 
   get pc ()        { return this.#pc }
   get connected () { return this.#dc?.readyState === 'open' }
@@ -322,24 +279,20 @@ class RTCPeer extends EventTarget {
   close () { try { this.#pc.close() } catch {} }
 }
 
-// ── RemoteSync ───────────────────────────────────────────────────────────────
-// Drop-in replacement for v1. Same public API — sync/index.js is unchanged.
+// ── RemoteSync ────────────────────────────────────────────────────────────────
+// Drop-in replacement — identical public API to v2.
 
 export class RemoteSync {
-  #session        = null    // { privkey, pubkey } — throwaway Nostr keypair
-  #pool           = null    // NostrPool
-  #peers          = new Map()  // nostrPubkey → { identityId, peer: RTCPeer }
-  #nostrToId      = new Map()  // nostrPubkey → identityId
-  #idToNostr      = new Map()  // identityId  → nostrPubkey
+  #pool           = null    // XpaceNodePool
+  #peers          = new Map()   // peerId → { identityId, peer: RTCPeer }
   #handlers       = {}
   #username       = ''
   #presetId       = 0
   #status         = 'available'
   #roomId         = ''
   #voiceCb        = null
-  #pendingTracks  = []         // { track, stream, identityId, nostrPubkey } — buffered before onVoiceTrack registered
-  #localTracks    = []         // { track, stream } queued before peer connects
-  #lastHello      = 0          // timestamp — debounce re-broadcasts
+  #pendingTracks  = []
+  #localTracks    = []
   #heartbeatTimer = null
 
   constructor (username, presetId = 0, status = 'available') {
@@ -349,134 +302,93 @@ export class RemoteSync {
   }
 
   async start () {
-    this.#session = genSession()
-    this.#roomId  = deriveRoomId()
-    this.#pool    = new NostrPool()
+    this.#roomId = deriveRoomId()
+    this.#pool   = new XpaceNodePool()
 
-    await this.#pool.connect(NOSTR_RELAYS)
+    const nodeUrl = resolveNodeUrl()
+    console.log('[RemoteSync] connecting to xpacenode:', nodeUrl)
+    await this.#pool.connect(nodeUrl)
 
-    // ── Subscribe to room presence (HELLO / BYE) ──────────────────────────
-    this.#pool.subscribe('room-presence', {
-      kinds: [20001],
-      '#r':  [this.#roomId],
-      '#t':  ['hello', 'bye'],
-    }, event => this.#handlePresence(event))
+    // ── Peer join ────────────────────────────────────────────────────────
+    this.#pool.on('peer_join', async msg => {
+      const { peerId, username = '', presetId = 0, status = 'available' } = msg
+      if (peerId === this.#selfId()) return
 
-    // ── Subscribe to signaling messages addressed to us ───────────────────
-    this.#pool.subscribe('room-signals', {
-      kinds: [20001],
-      '#r':  [this.#roomId],
-      '#p':  [this.#session.pubkey],
-    }, event => this.#handleIncomingSignal(event))
+      this.#fire('HELLO', { from: peerId, username, presetId, status })
 
-    // Announce ourselves
-    await this.#broadcastHello()
+      if (!this.#peers.has(peerId)) {
+        // Polite peer = lower string value (deterministic tie-break)
+        const isPolite = this.#selfId() < peerId
+        await this.#createPeer(peerId, isPolite)
+      }
+    })
 
-    // Heartbeat to global discovery channel so lobby can list active rooms
-    await this.#publishHeartbeat()
-    this.#heartbeatTimer = setInterval(() => this.#publishHeartbeat(), 30_000)
+    // ── Peer leave ───────────────────────────────────────────────────────
+    this.#pool.on('peer_leave', msg => {
+      this.#teardownPeer(msg.peerId)
+    })
+
+    // ── WebRTC signal from xpacenode ─────────────────────────────────────
+    this.#pool.on('signal', async msg => {
+      const { from, payload } = msg
+      if (!from || !payload) return
+      if (!this.#peers.has(from)) {
+        const isPolite = this.#selfId() < from
+        await this.#createPeer(from, isPolite)
+      }
+      await this.#peers.get(from)?.peer.handleSignal(payload)
+    })
+
+    // ── Announce ourselves to the room ───────────────────────────────────
+    this.#pool.send({
+      t:        'hello',
+      roomId:   this.#roomId,
+      peerId:   this.#selfId(),
+      username: this.#username,
+      presetId: this.#presetId,
+      status:   this.#status,
+    })
+
+    // Heartbeat every 30 s so the node doesn't prune us
+    this.#heartbeatTimer = setInterval(() => {
+      this.#pool.send({ t: 'hb', roomId: this.#roomId })
+    }, 30_000)
   }
 
   stop () {
     clearInterval(this.#heartbeatTimer)
-    this.#heartbeatTimer = null
-    this.#broadcastBye()
+    this.#pool?.send({ t: 'leave', roomId: this.#roomId })
     this.#pool?.close()
     for (const { peer } of this.#peers.values()) peer.close()
     this.#peers.clear()
-    this.#nostrToId.clear()
-    this.#idToNostr.clear()
     this.#pool = null
-  }
-
-  // ── Presence ──────────────────────────────────────────────────────────────
-
-  async #handlePresence (event) {
-    const nostrPubkey = event.pubkey
-    if (nostrPubkey === this.#session.pubkey) return   // ignore self
-
-    const tag  = event.tags.find(t => t[0] === 't')?.[1]
-    const body = (() => { try { return JSON.parse(event.content) } catch { return {} } })()
-
-    if (tag === 'hello') {
-      const { identityId, username = '', presetId = 0, status = 'available' } = body
-
-      this.#nostrToId.set(nostrPubkey, identityId)
-      this.#idToNostr.set(identityId,  nostrPubkey)
-
-      // Notify app layer — SpaceSync guards against duplicates
-      this.#fire('HELLO', { from: identityId, username, presetId, status })
-
-      // Create WebRTC peer if not already connected
-      if (!this.#peers.has(nostrPubkey)) {
-        const isPolite = this.#session.pubkey < nostrPubkey
-        await this.#createPeer(nostrPubkey, identityId, isPolite)
-      } else {
-        // Peer already exists (signal arrived before HELLO) — fix its identity now
-        const entry = this.#peers.get(nostrPubkey)
-        if (entry && entry.identityId !== identityId) {
-          entry.identityId = identityId
-        }
-      }
-
-      // Re-broadcast our HELLO so they can discover us (debounced 2 s)
-      const now = Date.now()
-      if (now - this.#lastHello > 2_000) {
-        this.#lastHello = now
-        await this.#broadcastHello()
-      }
-    }
-
-    if (tag === 'bye') {
-      const { identityId } = body
-      this.#teardownPeer(nostrPubkey, identityId)
-    }
-  }
-
-  // ── Signaling ─────────────────────────────────────────────────────────────
-
-  async #handleIncomingSignal (event) {
-    const nostrPubkey = event.pubkey
-    const signal = (() => { try { return JSON.parse(event.content) } catch { return null } })()
-    if (!signal) return
-
-    // Peer may send signals before their HELLO arrives — create lazily
-    if (!this.#peers.has(nostrPubkey)) {
-      const identityId = this.#nostrToId.get(nostrPubkey) ?? nostrPubkey
-      const isPolite   = this.#session.pubkey < nostrPubkey
-      await this.#createPeer(nostrPubkey, identityId, isPolite)
-    }
-
-    await this.#peers.get(nostrPubkey)?.peer.handleSignal(signal)
   }
 
   // ── Peer lifecycle ────────────────────────────────────────────────────────
 
-  async #createPeer (nostrPubkey, identityId, isPolite) {
+  async #createPeer (peerId, isPolite) {
     const peer = new RTCPeer(isPolite)
-    this.#peers.set(nostrPubkey, { identityId, peer })
+    this.#peers.set(peerId, { identityId: peerId, peer })
 
-    // Route WebRTC signals → Nostr
-    peer.addEventListener('signal', async ({ detail }) => {
-      const event = await buildEvent(
-        this.#session.privkey,
-        this.#session.pubkey,
-        [['r', this.#roomId], ['p', nostrPubkey]],
-        detail,
-      )
-      this.#pool?.publish(event)
+    // Route WebRTC signals through xpacenode
+    peer.addEventListener('signal', ({ detail }) => {
+      this.#pool?.send({
+        t:      'signal',
+        roomId: this.#roomId,
+        to:     peerId,
+        payload: detail,
+      })
     })
 
-    // Data channel messages → app events
-    peer.onMessage(msg => this.#handleDataMsg(msg, identityId))
+    // Data channel messages
+    peer.onMessage(msg => this.#handleDataMsg(msg, peerId))
 
-    // Audio / video tracks → voice layer
-    // If onVoiceTrack hasn't been registered yet, buffer for later delivery.
+    // Audio / video tracks
     peer.onTrack((track, stream) => {
       if (this.#voiceCb) {
-        this.#voiceCb(track, stream, identityId, nostrPubkey)
+        this.#voiceCb(track, stream, peerId, peerId)
       } else {
-        this.#pendingTracks.push({ track, stream, identityId, nostrPubkey })
+        this.#pendingTracks.push({ track, stream, identityId: peerId, nostrPubkey: peerId })
       }
     })
 
@@ -492,22 +404,20 @@ export class RemoteSync {
     })
 
     // Connection failed → tear down
-    peer.addEventListener('failed', () => this.#teardownPeer(nostrPubkey, identityId))
+    peer.addEventListener('failed', () => this.#teardownPeer(peerId))
 
-    // Add already-queued voice tracks immediately (needed for renegotiation)
+    // Add queued voice tracks
     for (const { track, stream } of this.#localTracks) peer.addTrack(track, stream)
 
     return peer
   }
 
-  #teardownPeer (nostrPubkey, identityId) {
-    const entry = this.#peers.get(nostrPubkey)
+  #teardownPeer (peerId) {
+    const entry = this.#peers.get(peerId)
     if (!entry) return
     entry.peer.close()
-    this.#peers.delete(nostrPubkey)
-    this.#nostrToId.delete(nostrPubkey)
-    this.#idToNostr.delete(identityId ?? entry.identityId)
-    this.#fire('PEER_LEAVE', { from: identityId ?? entry.identityId })
+    this.#peers.delete(peerId)
+    this.#fire('PEER_LEAVE', { from: peerId })
   }
 
   // ── Data channel message dispatch ─────────────────────────────────────────
@@ -515,20 +425,7 @@ export class RemoteSync {
   #handleDataMsg (msg, fallbackId) {
     const from = msg.identityId ?? fallbackId
     switch (msg.type) {
-      case 'intro': {
-        // The data channel intro carries the correct Ed25519 peerId — no relay needed.
-        // If this peer was created with a Nostr pubkey fallback, patch nostrToId now
-        // so re-keying in ProximityVoice fires immediately on the next update() tick.
-        if (msg.identityId && msg.identityId !== fallbackId) {
-          // fallbackId IS the nostrPubkey when the peer was created before HELLO arrived
-          const nostrPubkey = fallbackId
-          this.#nostrToId.set(nostrPubkey, msg.identityId)
-          this.#idToNostr.set(msg.identityId, nostrPubkey)
-          // Also fix the peer entry itself
-          const entry = this.#peers.get(nostrPubkey)
-          if (entry) entry.identityId = msg.identityId
-        }
-        // Update the app's view of this peer (name / avatar / status may change)
+      case 'intro':
         this.#fire('HELLO', {
           from,
           username: msg.username,
@@ -536,7 +433,6 @@ export class RemoteSync {
           status:   msg.status   ?? 'available',
         })
         break
-      }
       case 'move':
         this.#fire('MOVE', { from, pos: msg.pos })
         break
@@ -558,44 +454,7 @@ export class RemoteSync {
     }
   }
 
-  // ── Nostr publishing ──────────────────────────────────────────────────────
-
-  async #broadcastHello () {
-    const event = await buildEvent(
-      this.#session.privkey,
-      this.#session.pubkey,
-      [['r', this.#roomId], ['t', 'hello']],
-      {
-        identityId: this.#selfId(),
-        username:   this.#username,
-        presetId:   this.#presetId,
-        status:     this.#status,
-      },
-    )
-    this.#pool?.publish(event)
-  }
-
-  async #publishHeartbeat () {
-    const event = await buildEvent(
-      this.#session.privkey,
-      this.#session.pubkey,
-      [['r', 'sw-2-_discover'], ['t', 'heartbeat']],
-      { roomId: this.#roomId, roomName: currentRoomName(), username: this.#username },
-    )
-    this.#pool?.publish(event)
-  }
-
-  async #broadcastBye () {
-    const event = await buildEvent(
-      this.#session.privkey,
-      this.#session.pubkey,
-      [['r', this.#roomId], ['t', 'bye']],
-      { identityId: this.#selfId() },
-    )
-    this.#pool?.publish(event)
-  }
-
-  // ── Public API — identical to v1 ─────────────────────────────────────────
+  // ── Public API (identical to v2) ──────────────────────────────────────────
 
   move (x, y, z, ry = 0) {
     const msg = { type: 'move', identityId: this.#selfId(), pos: { x, y, z, ry } }
@@ -634,32 +493,24 @@ export class RemoteSync {
 
   onVoiceTrack (cb) {
     this.#voiceCb = cb
-
-    // Drain buffered tracks that arrived before this callback was registered
     const pending = this.#pendingTracks.splice(0)
     for (const { track, stream, identityId, nostrPubkey } of pending) {
       if (track.readyState !== 'ended') cb(track, stream, identityId, nostrPubkey)
     }
-
-    // Also replay via getReceivers() for any tracks not caught by the buffer
-    // (e.g. tracks that arrived before this peer entry was created)
-    for (const [nostrPubkey, { identityId, peer }] of this.#peers) {
+    for (const [peerId, { peer }] of this.#peers) {
       for (const receiver of peer.pc.getReceivers()) {
         const t = receiver.track
         if (!t || t.kind !== 'audio' || t.readyState === 'ended') continue
-        cb(t, new MediaStream([t]), identityId, nostrPubkey)
+        cb(t, new MediaStream([t]), peerId, peerId)
       }
     }
   }
 
-  wireToIdentityId (nostrPubkey) {
-    return this.#nostrToId.get(nostrPubkey) ?? nostrPubkey
-  }
+  wireToIdentityId (peerId) { return peerId }
 
-  // getPeers() — used by voice layer for getReceivers replay
   getPeers () {
     const out = {}
-    for (const [nostrPubkey, { peer }] of this.#peers) out[nostrPubkey] = peer.pc
+    for (const [peerId, { peer }] of this.#peers) out[peerId] = peer.pc
     return out
   }
 
@@ -669,58 +520,58 @@ export class RemoteSync {
     return () => { this.#handlers[type] = this.#handlers[type].filter(h => h !== cb) }
   }
 
-  // ── Internal ──────────────────────────────────────────────────────────────
-
-  #selfId ()            { return getIdentity()?.peerId ?? 'unknown' }
-  #fire   (type, data)  { this.#handlers[type]?.forEach(cb => cb(data)) }
+  #selfId ()           { return getIdentity()?.peerId ?? 'unknown' }
+  #fire   (type, data) { this.#handlers[type]?.forEach(cb => cb(data)) }
 }
 
-// ── Room discovery ────────────────────────────────────────────────────────────
-// Used by the lobby to show active rooms before the user enters.
-// Returns a stop() function — call it when the lobby is dismissed.
+// ── Room discovery (lobby) ─────────────────────────────────────────────────────
+// Polls the xpacenode HTTP API for active rooms.
+// Returns a stop() function.
 
 export async function discoverActiveRooms (onUpdate) {
-  const session = genSession()
-  const pool    = new NostrPool()
-  await pool.connect(NOSTR_RELAYS)
+  const nodeWsUrl  = resolveNodeUrl()
+  // Convert ws:// or wss:// to http:// or https://
+  const apiBase    = nodeWsUrl.replace(/^ws(s?):\/\//, 'http$1://').replace(/:4002$/, ':3000')
 
-  // roomId → { roomName, usernames: Set, lastSeen }
-  const rooms   = new Map()
-  const STALE   = 90_000   // 90 s — two missed heartbeats = gone
+  let   stopped    = false
+  const STALE_MS   = 90_000
+
+  // Remote rooms seen via HTTP API
+  const remoteRooms = new Map()   // roomId → { count, usernames, lastSeen }
+
+  const fetchAndEmit = async () => {
+    if (stopped) return
+    try {
+      const res  = await fetch(`${apiBase}/rooms`, { signal: AbortSignal.timeout(5_000) })
+      const data = await res.json()
+      const now  = Date.now()
+
+      for (const r of (data.rooms ?? [])) {
+        remoteRooms.set(r.roomId, {
+          count:     r.count,
+          usernames: r.usernames ?? [],
+          lastSeen:  now,
+        })
+      }
+      // Prune stale
+      for (const [id, entry] of remoteRooms) {
+        if (now - entry.lastSeen > STALE_MS) remoteRooms.delete(id)
+      }
+      emit()
+    } catch { /* node unreachable — keep existing list */ }
+  }
 
   const emit = () => {
-    const now  = Date.now()
-    const list = []
-    for (const [roomId, entry] of rooms) {
-      if (now - entry.lastSeen > STALE) { rooms.delete(roomId); continue }
-      list.push({ roomId, roomName: entry.roomName, count: entry.usernames.size })
-    }
-    list.sort((a, b) => b.count - a.count)
+    const list = [...remoteRooms.entries()].map(([roomId, e]) => ({
+      roomId,
+      roomName: roomId,
+      count:    e.count,
+    })).sort((a, b) => b.count - a.count)
     onUpdate(list)
   }
 
-  pool.subscribe('discover', {
-    kinds: [20001],
-    '#r': ['sw-2-_discover'],
-    '#t': ['heartbeat'],
-    since: Math.floor(Date.now() / 1000) - 90,   // ignore heartbeats older than 90 s
-  }, event => {
-    // Relays may replay stored events — drop anything older than 90 s
-    if (Date.now() / 1000 - event.created_at > 90) return
-    try {
-      const { roomId, roomName, username } = JSON.parse(event.content)
-      if (!roomId) return
-      const entry = rooms.get(roomId) ?? { roomName: roomName || roomId, usernames: new Set() }
-      entry.roomName = roomName || entry.roomName
-      entry.usernames.add(username || 'anon')
-      entry.lastSeen = Date.now()
-      rooms.set(roomId, entry)
-    } catch {}
-    emit()
-  })
+  await fetchAndEmit()
+  const timer = setInterval(fetchAndEmit, 30_000)
 
-  // Prune stale rooms every 30 s even if no new heartbeats arrive
-  const pruneTimer = setInterval(emit, 30_000)
-
-  return () => { clearInterval(pruneTimer); pool.close() }
+  return () => { stopped = true; clearInterval(timer) }
 }

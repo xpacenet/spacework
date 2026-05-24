@@ -1,0 +1,54 @@
+services:
+  xpacenode:
+    build: .
+    container_name: xpacenode
+    restart: unless-stopped
+
+    environment:
+      NODE_HOST:        ${NODE_HOST:-0.0.0.0}
+      NODE_TCP_PORT:    ${NODE_TCP_PORT:-4001}
+      NODE_WS_PORT:     ${NODE_WS_PORT:-4002}
+      NODE_API_PORT:    ${NODE_API_PORT:-3000}
+      BOOTSTRAP_PEERS:  ${BOOTSTRAP_PEERS:-}
+      PEER_TTL_MS:      ${PEER_TTL_MS:-90000}
+      MAX_WS_CLIENTS:   ${MAX_WS_CLIENTS:-500}
+      DATA_DIR:         /data
+
+    ports:
+      - "${NODE_TCP_PORT:-4001}:4001"   # libp2p swarm (node ↔ node)
+      - "${NODE_WS_PORT:-4002}:4002"    # WebSocket   (browser clients)
+      - "${NODE_API_PORT:-3000}:3000"   # HTTP API
+
+    volumes:
+      - xpacenode-data:/data            # persistent identity + state
+
+    networks:
+      - xpacenode-net                   # isolated bridge — no host network
+
+    # ── Resource limits — coexist safely with the host ─────────────────────
+    mem_limit:        256m              # max 256 MB RAM
+    mem_reservation:  64m              # soft floor
+    cpus:             "0.5"            # at most half a core
+
+    # ── Hardening ──────────────────────────────────────────────────────────
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL                            # drop all Linux capabilities
+    read_only: true                    # root FS is read-only
+    tmpfs:
+      - /tmp:size=32m,mode=1777        # writable /tmp in RAM only
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  xpacenode-data:
+    driver: local
+
+networks:
+  xpacenode-net:
+    driver: bridge
