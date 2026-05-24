@@ -1,1 +1,1 @@
-2026-05-24T13:00 fix: 3D ring z-fight + pending track buffer + AudioContext resume on track
+2026-05-24T14:00 fix: patch identity from intro msg + fix peer entry on HELLO arrival

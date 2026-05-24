@@ -411,6 +411,12 @@ export class RemoteSync {
       if (!this.#peers.has(nostrPubkey)) {
         const isPolite = this.#session.pubkey < nostrPubkey
         await this.#createPeer(nostrPubkey, identityId, isPolite)
+      } else {
+        // Peer already exists (signal arrived before HELLO) — fix its identity now
+        const entry = this.#peers.get(nostrPubkey)
+        if (entry && entry.identityId !== identityId) {
+          entry.identityId = identityId
+        }
       }
 
       // Re-broadcast our HELLO so they can discover us (debounced 2 s)
@@ -509,7 +515,19 @@ export class RemoteSync {
   #handleDataMsg (msg, fallbackId) {
     const from = msg.identityId ?? fallbackId
     switch (msg.type) {
-      case 'intro':
+      case 'intro': {
+        // The data channel intro carries the correct Ed25519 peerId — no relay needed.
+        // If this peer was created with a Nostr pubkey fallback, patch nostrToId now
+        // so re-keying in ProximityVoice fires immediately on the next update() tick.
+        if (msg.identityId && msg.identityId !== fallbackId) {
+          // fallbackId IS the nostrPubkey when the peer was created before HELLO arrived
+          const nostrPubkey = fallbackId
+          this.#nostrToId.set(nostrPubkey, msg.identityId)
+          this.#idToNostr.set(msg.identityId, nostrPubkey)
+          // Also fix the peer entry itself
+          const entry = this.#peers.get(nostrPubkey)
+          if (entry) entry.identityId = msg.identityId
+        }
         // Update the app's view of this peer (name / avatar / status may change)
         this.#fire('HELLO', {
           from,
@@ -518,6 +536,7 @@ export class RemoteSync {
           status:   msg.status   ?? 'available',
         })
         break
+      }
       case 'move':
         this.#fire('MOVE', { from, pos: msg.pos })
         break
