@@ -1,1 +1,1 @@
-2026-05-24T08:00 turn-relay: add openrelay TURN server for NAT traversal
+2026-05-24T10:00 room-discovery: active rooms in lobby + invite link button

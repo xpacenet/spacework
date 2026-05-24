@@ -326,19 +326,20 @@ class RTCPeer extends EventTarget {
 // Drop-in replacement for v1. Same public API — sync/index.js is unchanged.
 
 export class RemoteSync {
-  #session     = null    // { privkey, pubkey } — throwaway Nostr keypair
-  #pool        = null    // NostrPool
-  #peers       = new Map()  // nostrPubkey → { identityId, peer: RTCPeer }
-  #nostrToId   = new Map()  // nostrPubkey → identityId
-  #idToNostr   = new Map()  // identityId  → nostrPubkey
-  #handlers    = {}
-  #username    = ''
-  #presetId    = 0
-  #status      = 'available'
-  #roomId      = ''
-  #voiceCb     = null
-  #localTracks = []         // { track, stream } queued before peer connects
-  #lastHello   = 0          // timestamp — debounce re-broadcasts
+  #session        = null    // { privkey, pubkey } — throwaway Nostr keypair
+  #pool           = null    // NostrPool
+  #peers          = new Map()  // nostrPubkey → { identityId, peer: RTCPeer }
+  #nostrToId      = new Map()  // nostrPubkey → identityId
+  #idToNostr      = new Map()  // identityId  → nostrPubkey
+  #handlers       = {}
+  #username       = ''
+  #presetId       = 0
+  #status         = 'available'
+  #roomId         = ''
+  #voiceCb        = null
+  #localTracks    = []         // { track, stream } queued before peer connects
+  #lastHello      = 0          // timestamp — debounce re-broadcasts
+  #heartbeatTimer = null
 
   constructor (username, presetId = 0, status = 'available') {
     this.#username = username
@@ -369,9 +370,15 @@ export class RemoteSync {
 
     // Announce ourselves
     await this.#broadcastHello()
+
+    // Heartbeat to global discovery channel so lobby can list active rooms
+    await this.#publishHeartbeat()
+    this.#heartbeatTimer = setInterval(() => this.#publishHeartbeat(), 30_000)
   }
 
   stop () {
+    clearInterval(this.#heartbeatTimer)
+    this.#heartbeatTimer = null
     this.#broadcastBye()
     this.#pool?.close()
     for (const { peer } of this.#peers.values()) peer.close()
@@ -540,6 +547,16 @@ export class RemoteSync {
     this.#pool?.publish(event)
   }
 
+  async #publishHeartbeat () {
+    const event = await buildEvent(
+      this.#session.privkey,
+      this.#session.pubkey,
+      [['r', 'sw-2-_discover'], ['t', 'heartbeat']],
+      { roomId: this.#roomId, roomName: currentRoomName(), username: this.#username },
+    )
+    this.#pool?.publish(event)
+  }
+
   async #broadcastBye () {
     const event = await buildEvent(
       this.#session.privkey,
@@ -615,4 +632,51 @@ export class RemoteSync {
 
   #selfId ()            { return getIdentity()?.peerId ?? 'unknown' }
   #fire   (type, data)  { this.#handlers[type]?.forEach(cb => cb(data)) }
+}
+
+// ── Room discovery ────────────────────────────────────────────────────────────
+// Used by the lobby to show active rooms before the user enters.
+// Returns a stop() function — call it when the lobby is dismissed.
+
+export async function discoverActiveRooms (onUpdate) {
+  const session = genSession()
+  const pool    = new NostrPool()
+  await pool.connect(NOSTR_RELAYS)
+
+  // roomId → { roomName, usernames: Set, lastSeen }
+  const rooms   = new Map()
+  const STALE   = 90_000   // 90 s — two missed heartbeats = gone
+
+  const emit = () => {
+    const now  = Date.now()
+    const list = []
+    for (const [roomId, entry] of rooms) {
+      if (now - entry.lastSeen > STALE) { rooms.delete(roomId); continue }
+      list.push({ roomId, roomName: entry.roomName, count: entry.usernames.size })
+    }
+    list.sort((a, b) => b.count - a.count)
+    onUpdate(list)
+  }
+
+  pool.subscribe('discover', {
+    kinds: [20001],
+    '#r': ['sw-2-_discover'],
+    '#t': ['heartbeat'],
+  }, event => {
+    try {
+      const { roomId, roomName, username } = JSON.parse(event.content)
+      if (!roomId) return
+      const entry = rooms.get(roomId) ?? { roomName: roomName || roomId, usernames: new Set() }
+      entry.roomName = roomName || entry.roomName
+      entry.usernames.add(username || 'anon')
+      entry.lastSeen = Date.now()
+      rooms.set(roomId, entry)
+    } catch {}
+    emit()
+  })
+
+  // Prune stale rooms every 30 s even if no new heartbeats arrive
+  const pruneTimer = setInterval(emit, 30_000)
+
+  return () => { clearInterval(pruneTimer); pool.close() }
 }

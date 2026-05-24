@@ -13,7 +13,7 @@ import { ProximityVoice }   from './ui/proximityVoice.js'
 import { PresencePanel }    from './ui/presencePanel.js'
 import { spaceSync }         from './sync/index.js'
 import { loadIdentity, getIdentity } from './identity/index.js'
-import { setRoomName, currentRoomName } from './sync/remote.js'
+import { setRoomName, currentRoomName, discoverActiveRooms } from './sync/remote.js'
 import { WorldHistory }      from './universe/index.js'
 
 // ── Bootstrap — load identity before anything else ────────────────────────────
@@ -118,6 +118,31 @@ import { WorldHistory }      from './universe/index.js'
     })
   })()
 
+  // ── Active room discovery ────────────────────────────────────────────────────
+  let _stopDiscover = null
+  const _activeRoomsEl     = document.getElementById('active-rooms')
+  const _activeRoomsListEl = document.getElementById('active-rooms-list')
+
+  discoverActiveRooms(rooms => {
+    if (!_activeRoomsEl || !_activeRoomsListEl) return
+    if (rooms.length === 0) { _activeRoomsEl.style.display = 'none'; return }
+    _activeRoomsEl.style.display = 'block'
+    _activeRoomsListEl.innerHTML = rooms.slice(0, 5).map(r => {
+      const label = r.roomName === 'main' ? 'main (public)' : r.roomName
+      const count = `${r.count} ${r.count === 1 ? 'person' : 'people'}`
+      return `<button class="lobby-room-chip" data-room="${r.roomName}">
+        <span class="room-chip-dot"></span>
+        <span class="room-chip-name">${label}</span>
+        <span class="room-chip-count">${count}</span>
+      </button>`
+    }).join('')
+    _activeRoomsListEl.querySelectorAll('.lobby-room-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (roomInput) roomInput.value = btn.dataset.room
+      })
+    })
+  }).then(stop => { _stopDiscover = stop })
+
   // ── Enter key shortcuts ──────────────────────────────────────────────────────
   usernameInput?.addEventListener('keydown', e => { if (e.key === 'Enter') startBoarding() })
   roomInput?.addEventListener('keydown',    e => { if (e.key === 'Enter') startBoarding() })
@@ -138,6 +163,8 @@ import { WorldHistory }      from './universe/index.js'
 
     // Set room from the input (updates URL hash — shareable link)
     if (roomInput?.value.trim()) setRoomName(roomInput.value.trim())
+
+    _stopDiscover?.(); _stopDiscover = null
 
     window._spaceUsername = username
     lobby.style.display   = 'none'
@@ -517,6 +544,19 @@ import { WorldHistory }      from './universe/index.js'
       document.getElementById('nm-open-btn')?.addEventListener('click', e => {
         e.stopPropagation()
         openNetworkMap(swarmNet, visLayer, username)
+      })
+
+      document.getElementById('invite-btn')?.addEventListener('click', e => {
+        e.stopPropagation()
+        const url = window.location.href
+        navigator.clipboard.writeText(url).then(() => {
+          const btn = document.getElementById('invite-btn')
+          const prev = btn.textContent
+          btn.textContent = '✅ Copied!'
+          setTimeout(() => { btn.textContent = prev }, 2000)
+        }).catch(() => {
+          prompt('Copy this link to invite someone:', url)
+        })
       })
 
       // ── Mobile bottom bar wiring ─────────────────────────────────────────────

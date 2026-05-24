@@ -288,6 +288,24 @@
         line-height: 1.4; margin: 0;
       }
 
+      /* ── ACTIVE ROOMS ─────────────────────────────────────────────────── */
+      .lobby-active-label {
+        font-size: 0.62rem; letter-spacing: 0.1em; color: rgba(255,255,255,0.3);
+        margin-bottom: 6px;
+      }
+      .lobby-room-chip {
+        display: flex; align-items: center; gap: 8px;
+        width: 100%; padding: 8px 12px; margin-bottom: 5px;
+        background: rgba(0,180,120,0.08); border: 1px solid rgba(0,255,140,0.18);
+        border-radius: 8px; cursor: pointer; color: rgba(255,255,255,0.85);
+        font-size: 0.8rem; text-align: left;
+        transition: background 0.15s, border-color 0.15s;
+      }
+      .lobby-room-chip:hover { background: rgba(0,220,140,0.15); border-color: rgba(0,255,140,0.4); }
+      .room-chip-dot { width: 7px; height: 7px; border-radius: 50%; background: #00ff88; flex-shrink: 0; }
+      .room-chip-name { flex: 1; font-weight: 500; }
+      .room-chip-count { font-size: 0.7rem; color: rgba(255,255,255,0.4); }
+
       /* ── VIRTUAL JOYSTICK ────────────────────────────────────────────── */
       #vjoy-zone {
         position: fixed; left: 0; bottom: 0;
@@ -365,7 +383,7 @@
         .lobby-sub   { font-size: 0.82rem; }
 
         /* Hide desktop right-side buttons — mobile bar replaces them */
-        #nm-open-btn, #chat-toggle, #voice-btn, #status-btn { display: none; }
+        #nm-open-btn, #chat-toggle, #voice-btn, #invite-btn, #status-btn { display: none; }
         /* Avatar btn: move to bottom-left above bar */
         #avatar-btn { top: auto !important; bottom: 70px; left: 16px; }
 
@@ -950,6 +968,12 @@
           </p>
         </div>
 
+        <!-- Active rooms — populated by discoverActiveRooms() -->
+        <div id="active-rooms" style="display:none;width:100%">
+          <div class="lobby-active-label">ACTIVE NOW</div>
+          <div id="active-rooms-list"></div>
+        </div>
+
         <!-- Avatar selection -->
         <div class="lobby-avatar-row">
           <div class="lobby-avatar-label">CHOOSE YOUR AVATAR</div>
@@ -1009,6 +1033,7 @@
       <button id="nm-open-btn"  class="hud-side-btn">🌐 Network</button>
       <button id="chat-toggle"  class="hud-side-btn" style="top:92px">💬 Chat <span id="chat-badge"></span></button>
       <button id="voice-btn"    class="hud-side-btn" style="top:128px">🎙 Voice</button>
+      <button id="invite-btn"   class="hud-side-btn" style="top:164px">🔗 Invite</button>
       <button id="status-btn"   class="hud-side-btn">🟢 Available</button>
       <div    id="status-menu"></div>
 
