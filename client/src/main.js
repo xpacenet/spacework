@@ -26,7 +26,7 @@ import { WorldHistory }      from './universe/index.js'
   const dismiss  = document.getElementById('conn-log-dismiss')
   if (!panel) return
 
-  const ICONS = { pending: '⏳', ok: '✅', fail: '❌', warn: '⚠️', info: '·' }
+  const ICONS = { pending: '⏳', ok: '✅', fail: '❌', warn: '⚠️', info: '·', host: '🏠' }
   const stepEls = new Map()   // stepId → DOM element
 
   const show = () => panel.classList.remove('hidden')
@@ -80,9 +80,43 @@ import { WorldHistory }      from './universe/index.js'
 
   dismiss?.addEventListener('click', hide)
 
-  // Auto-dismiss 6s after a peer connects
+  // First-in-room — device is the anchor, prompt user to share
+  connLog.addEventListener('first-in-room', () => {
+    title.textContent = '🏠 You\'re the host'
+    panel.style.borderColor = 'rgba(255,180,50,0.35)'
+
+    // Add a quick "Copy invite link" shortcut inside the log
+    const existing = document.getElementById('cl-host-share')
+    if (!existing) {
+      const btn = document.createElement('button')
+      btn.id = 'cl-host-share'
+      btn.textContent = '🔗 Copy invite link'
+      btn.style.cssText = `
+        display:block; width:calc(100% - 28px); margin:4px 14px 8px;
+        padding:7px; border-radius:6px; border:1px solid rgba(255,180,50,0.3);
+        background:rgba(255,180,50,0.08); color:rgba(255,220,100,0.9);
+        font-size:0.75rem; cursor:pointer; text-align:center;
+      `
+      btn.addEventListener('click', async () => {
+        try {
+          const { link } = await createRoomLink({
+            roomId: spaceSync.roomName,
+            node:   spaceSync.nodeUrl ?? undefined,
+          })
+          await navigator.clipboard.writeText(link)
+          btn.textContent = '✅ Copied!'
+          setTimeout(() => { btn.textContent = '🔗 Copy invite link' }, 2000)
+        } catch { /* clipboard denied */ }
+      })
+      body.after(btn)
+    }
+  })
+
+  // Auto-dismiss 6s after first peer connects
   spaceSync.addEventListener('peer:join', () => {
     title.textContent = '⬡ Connected'
+    panel.style.borderColor = ''
+    document.getElementById('cl-host-share')?.remove()
     setTimeout(hide, 6000)
   })
 })()

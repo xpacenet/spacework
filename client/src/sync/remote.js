@@ -352,46 +352,52 @@ export class RemoteSync {
       connLog.ok(roomStep, 'Using default room')
     }
 
-    // ── Step 2: known peers from link or cache ────────────────────────────────
+    // ── Step 2: known peers ───────────────────────────────────────────────────
     if (this.#knownPeers.length) {
       const src = link.type === 'link' ? 'invite link' : 'previous session'
       connLog.info(
-        `${this.#knownPeers.length} known peer${this.#knownPeers.length > 1 ? 's' : ''} from ${src} — will try direct connections first`
+        `${this.#knownPeers.length} known peer${this.#knownPeers.length > 1 ? 's' : ''} from ${src}`,
+        'Will reconnect directly if they are online'
       )
     }
 
-    // ── Step 3: resolve signaling node ───────────────────────────────────────
+    // ── Step 3: signaling ladder ──────────────────────────────────────────────
     this.#nodeUrl = resolveNodeUrl(link.node)
 
     if (!this.#nodeUrl) {
-      connLog.info('No xpacenode configured — will use BitTorrent DHT')
+      // No node → DHT public fallback
+      connLog.info('No xpacenode — trying public DHT route')
       throw Object.assign(new Error('NO_NODE'), {
         roomHash: this.#roomId,
         roomName: this.#roomName,
         linkType: link.type,
+        knownPeers: this.#knownPeers,
       })
     }
 
     this.#pool = new XpaceNodePool()
-
-    const nodeStep = connLog.push(`Connecting to xpacenode…`, 'pending', this.#nodeUrl)
-    console.log(`[RemoteSync] room:"${this.#roomName}" hash:${this.#roomId.slice(0,12)}… node:${this.#nodeUrl}`)
+    const nodeStep = connLog.push('Connecting to xpacenode…', 'pending', this.#nodeUrl)
     try {
       await this.#pool.connect(this.#nodeUrl)
       connLog.ok(nodeStep, this.#nodeUrl)
     } catch (err) {
-      connLog.fail(nodeStep, 'Could not reach xpacenode')
+      connLog.fail(nodeStep, 'xpacenode unreachable — trying public DHT route')
       throw err
     }
 
-    connLog.info('Waiting for peers in room…')
+    // ── Step 4: waiting for peers / self-as-host timer ────────────────────────
+    connLog.info('Searching for peers in room…')
+    connLog.startFirstTimer(12_000)
 
     // ── Peer join ────────────────────────────────────────────────────────
     this.#pool.on('peer_join', async msg => {
       const { peerId, username = '', presetId = 0, status = 'available' } = msg
       if (peerId === this.#selfId()) return
 
-      connLog.info(`Peer found: ${username || peerId.slice(0, 10)}…`)
+      const isKnown = this.#knownPeers.includes(peerId)
+      connLog.peerJoined(username || peerId.slice(0, 10))
+      if (isKnown) connLog.info(`✓ ${username || peerId.slice(0,10)} — known peer (reconnected)`)
+
       this.#fire('HELLO', { from: peerId, username, presetId, status })
 
       if (!this.#peers.has(peerId)) {

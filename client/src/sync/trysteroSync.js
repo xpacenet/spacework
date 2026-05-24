@@ -44,6 +44,7 @@ export class TrysteroSync {
   #sendTalking = null
   #sendBye     = null
   #sendIntro   = null
+  #knownPeers  = []
 
   constructor (username, presetId = 0, status = 'available') {
     this.#username = username
@@ -51,15 +52,23 @@ export class TrysteroSync {
     this.#status   = status
   }
 
-  async start (roomHash, roomName, linkType = 'default') {
-    this.#roomId   = roomHash
-    this.#roomName = roomName
+  async start (roomHash, roomName, linkType = 'default', knownPeers = []) {
+    this.#roomId    = roomHash
+    this.#roomName  = roomName
+    this.#knownPeers = knownPeers
 
     if (linkType === 'link') {
       connLog.info('Invite link decoded — using hashed room address')
     }
 
-    const dhtId = connLog.push('Starting BitTorrent DHT discovery…')
+    if (knownPeers.length) {
+      connLog.info(
+        `${knownPeers.length} known peer${knownPeers.length > 1 ? 's' : ''} cached`,
+        'Will recognise them when they appear on DHT'
+      )
+    }
+
+    const dhtId = connLog.push('Trying public DHT route (BitTorrent)…')
 
     this.#room = joinRoom(
       { appId: 'xpacenet-v3', rtcConfig: { iceServers: ICE_SERVERS } },
@@ -86,7 +95,10 @@ export class TrysteroSync {
     // ── Peer join ──────────────────────────────────────────────────────────────
     this.#room.onPeerJoin(peerId => {
       if (peerId === this.#selfId()) return
-      connLog.info(`Peer found via DHT: ${peerId.slice(0, 10)}…`)
+
+      const isKnown = this.#knownPeers.includes(peerId)
+      connLog.peerJoined(peerId.slice(0, 10))
+      if (isKnown) connLog.info(`✓ Known peer reconnected via DHT`)
 
       // Send our intro immediately
       sendIntro({
@@ -136,6 +148,8 @@ export class TrysteroSync {
     })
 
     connLog.ok(dhtId, 'DHT ready — searching for peers')
+    connLog.info('Searching for peers in room…')
+    connLog.startFirstTimer(15_000)   // longer timeout for DHT (slower than xpacenode)
   }
 
   stop () {

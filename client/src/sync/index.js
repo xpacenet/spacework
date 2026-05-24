@@ -58,13 +58,14 @@ export class SpaceSync extends EventTarget {
     } catch (err) {
       if (err?.message === 'NO_NODE') {
         remote = new TrysteroSync(username, presetId, status)
-        await remote.start(err.roomHash, err.roomName, err.linkType)
+        await remote.start(err.roomHash, err.roomName, err.linkType, err.knownPeers ?? [])
       } else {
-        connLog.info('xpacenode unreachable — falling back to BitTorrent DHT')
-        const { parseCurrentLink } = await import('./roomLink.js')
-        const link = await parseCurrentLink()
+        connLog.info('xpacenode unreachable — falling back to public DHT route')
+        const { parseCurrentLink, getKnownPeers } = await import('./roomLink.js')
+        const link  = await parseCurrentLink()
+        const known = getKnownPeers(link.roomHash)
         remote = new TrysteroSync(username, presetId, status)
-        await remote.start(link.roomHash, link.roomId, link.type)
+        await remote.start(link.roomHash, link.roomId, link.type, known)
       }
     }
     this.#remote = remote
