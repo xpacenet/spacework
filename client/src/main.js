@@ -565,25 +565,86 @@ import { WorldHistory }      from './universe/index.js'
         openNetworkMap(swarmNet, visLayer, username)
       })
 
-      document.getElementById('invite-btn')?.addEventListener('click', async e => {
+      // ── Invite modal ──────────────────────────────────────────────────────────
+      const inviteModal      = document.getElementById('invite-modal')
+      const inviteLockInput  = document.getElementById('invite-lock-input')
+      const inviteLinkBox    = document.getElementById('invite-link-box')
+      const inviteLinkText   = document.getElementById('invite-link-text')
+      const inviteRoomName   = document.getElementById('invite-room-name')
+      const inviteGenBtn     = document.getElementById('invite-generate-btn')
+      const inviteCopyBtn    = document.getElementById('invite-copy-btn')
+      const inviteCloseBtn   = document.getElementById('invite-close-btn')
+      let   _currentInviteLink = ''
+
+      const openInviteModal = () => {
+        inviteRoomName.textContent = `Room: ${spaceSync.roomName}`
+        inviteLockInput.value = ''
+        inviteLinkBox.style.display   = 'none'
+        inviteCopyBtn.style.display   = 'none'
+        inviteGenBtn.style.display    = ''
+        inviteGenBtn.textContent      = 'Generate link'
+        inviteModal.style.display     = 'flex'
+        setTimeout(() => inviteLockInput.focus(), 50)
+      }
+
+      document.getElementById('invite-btn')?.addEventListener('click', e => {
         e.stopPropagation()
-        const btn = document.getElementById('invite-btn')
+        openInviteModal()
+      })
+
+      inviteCloseBtn?.addEventListener('click', () => {
+        inviteModal.style.display = 'none'
+      })
+
+      // Close on backdrop click
+      inviteModal?.addEventListener('click', e => {
+        if (e.target === inviteModal) inviteModal.style.display = 'none'
+      })
+
+      // Generate link
+      inviteGenBtn?.addEventListener('click', async () => {
+        inviteGenBtn.textContent = 'Generating…'
+        inviteGenBtn.disabled    = true
         try {
-          // Generate a gated link: encodes roomHash + preferred node + known peers
-          const nodeUrl = spaceSync.nodeUrl ?? undefined
           const { link } = await createRoomLink({
             roomId:   spaceSync.roomName,
-            lockCode: '',            // open room (no lock) — add UI for lock later
-            node:     nodeUrl,
+            lockCode: inviteLockInput.value.trim(),
+            node:     spaceSync.nodeUrl ?? undefined,
           })
-          await navigator.clipboard.writeText(link)
-          const prev = btn.textContent
-          btn.textContent = '✅ Copied!'
-          setTimeout(() => { btn.textContent = prev }, 2000)
-        } catch {
-          // Fallback — plain URL
-          prompt('Copy this link to invite someone:', window.location.href)
+          _currentInviteLink          = link
+          inviteLinkText.textContent  = link
+          inviteLinkBox.style.display = 'block'
+          inviteCopyBtn.style.display = ''
+          inviteGenBtn.style.display  = 'none'
+
+          // Auto-copy
+          navigator.clipboard.writeText(link).catch(() => {})
+        } catch (err) {
+          console.error('[invite] link generation failed', err)
+          inviteGenBtn.textContent = 'Generate link'
+        } finally {
+          inviteGenBtn.disabled = false
         }
+      })
+
+      // Copy button
+      inviteCopyBtn?.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(_currentInviteLink)
+          const prev = inviteCopyBtn.textContent
+          inviteCopyBtn.textContent = '✅ Copied!'
+          setTimeout(() => { inviteCopyBtn.textContent = prev }, 2000)
+        } catch {
+          prompt('Copy this link:', _currentInviteLink)
+        }
+      })
+
+      // Copy on clicking the link text
+      inviteLinkText?.addEventListener('click', () => inviteCopyBtn?.click())
+
+      // Enter in lock input → generate
+      inviteLockInput?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') inviteGenBtn?.click()
       })
 
       // ── Mobile bottom bar wiring ─────────────────────────────────────────────

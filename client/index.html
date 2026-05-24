@@ -1071,6 +1071,59 @@
       <!-- Toast -->
       <div id="hud-toast"></div>
 
+      <!-- Invite link modal -->
+      <div id="invite-modal" style="
+        display:none; position:fixed; inset:0; z-index:200;
+        background:rgba(0,0,0,0.7); align-items:center; justify-content:center;
+        pointer-events:all;
+      ">
+        <div style="
+          background:#1a1a2e; border:1px solid rgba(100,120,255,0.4);
+          border-radius:14px; padding:28px 32px; width:340px; max-width:90vw;
+          box-shadow:0 8px 40px rgba(0,0,0,0.6); color:#fff; font-family:inherit;
+        ">
+          <div style="font-size:1.1rem;font-weight:700;margin-bottom:6px">🔗 Invite to room</div>
+          <div id="invite-room-name" style="font-size:0.82rem;color:rgba(255,255,255,0.5);margin-bottom:20px"></div>
+
+          <label style="font-size:0.82rem;color:rgba(255,255,255,0.6);display:block;margin-bottom:6px">
+            Lock code <span style="color:rgba(255,255,255,0.35)">(optional — only people with this code can join)</span>
+          </label>
+          <input id="invite-lock-input" type="text" placeholder="Leave blank for open room"
+            autocomplete="off" maxlength="64"
+            style="
+              width:100%; box-sizing:border-box; background:rgba(255,255,255,0.07);
+              border:1px solid rgba(255,255,255,0.15); border-radius:8px;
+              padding:10px 12px; color:#fff; font-size:0.95rem; outline:none;
+              margin-bottom:20px;
+            "
+          />
+
+          <div id="invite-link-box" style="display:none;margin-bottom:20px">
+            <div style="font-size:0.78rem;color:rgba(255,255,255,0.5);margin-bottom:6px">Shareable link:</div>
+            <div id="invite-link-text" style="
+              background:rgba(255,255,255,0.06); border-radius:8px; padding:10px 12px;
+              font-size:0.78rem; word-break:break-all; color:#aac8ff; cursor:pointer;
+              border:1px solid rgba(100,150,255,0.2);
+            "></div>
+          </div>
+
+          <div style="display:flex;gap:10px">
+            <button id="invite-generate-btn" style="
+              flex:1; padding:10px; border-radius:8px; border:none; cursor:pointer;
+              background:#3355ff; color:#fff; font-size:0.9rem; font-weight:600;
+            ">Generate link</button>
+            <button id="invite-copy-btn" style="
+              display:none; flex:1; padding:10px; border-radius:8px; border:none; cursor:pointer;
+              background:#22aa66; color:#fff; font-size:0.9rem; font-weight:600;
+            ">Copy link</button>
+            <button id="invite-close-btn" style="
+              padding:10px 16px; border-radius:8px; border:1px solid rgba(255,255,255,0.15);
+              background:transparent; color:rgba(255,255,255,0.6); font-size:0.9rem; cursor:pointer;
+            ">Close</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Overview overlay -->
       <div id="overview-panel">
         <div class="overview-banner">🗺 3D MAP — Click anywhere to walk there &nbsp;·&nbsp; <kbd style="background:rgba(255,255,255,0.1);padding:1px 6px;border-radius:4px;">TAB</kbd> to switch view</div>

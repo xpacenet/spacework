@@ -176,6 +176,10 @@ export function forgetPeer (roomHash, peerId) {
  * Generates a plain hash — user can upgrade to a locked link from the HUD.
  */
 export function setRoomNameInUrl (name) {
-  const slug = name.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-{2,}/g, '-') || 'main'
+  const slug = name.trim().toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')   // strip leading/trailing hyphens
+    || 'main'
   window.location.hash = slug
 }
