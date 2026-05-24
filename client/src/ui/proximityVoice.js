@@ -98,6 +98,9 @@ export class ProximityVoice {
   }
 
   _addPeerTrack (identityId, track, wirePeerId) {
+    // Ensure AudioContext is running — can get suspended between user gesture and track arrival
+    if (this._ctx?.state === 'suspended') this._ctx.resume().catch(() => {})
+
     const src      = this._ctx.createMediaStreamSource(new MediaStream([track]))
     const gain     = this._ctx.createGain()
     const analyser = this._ctx.createAnalyser()

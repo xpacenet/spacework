@@ -174,16 +174,17 @@ function _populate (group, username, presetId) {
   // ── Talking ring — flat torus at foot level, shown when voice-active ────────
   // Preserved across preset swaps via userData so external code can keep a ref.
   const talkRing = new THREE.Mesh(
-    new THREE.TorusGeometry(0.38, 0.045, 6, 32),
+    new THREE.TorusGeometry(0.38, 0.055, 8, 32),
     new THREE.MeshBasicMaterial({
       color: 0x00ff88, transparent: true, opacity: 0,
-      emissive: new THREE.Color(0x00ff88), depthWrite: false,
+      depthWrite: false, depthTest: false,   // always render on top of floor
       side: THREE.DoubleSide,
     })
   )
-  talkRing.rotation.x = Math.PI / 2    // lay flat on the floor
-  talkRing.position.y = 0.01           // just above floor
-  talkRing.visible    = false
+  talkRing.rotation.x  = Math.PI / 2    // lay flat
+  talkRing.position.y  = 0.06           // clear of floor
+  talkRing.renderOrder = 999            // render after all scene geometry
+  talkRing.visible     = false
   group.add(talkRing)
   group.userData.talkRing = talkRing
 

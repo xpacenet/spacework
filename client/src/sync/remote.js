@@ -337,6 +337,7 @@ export class RemoteSync {
   #status         = 'available'
   #roomId         = ''
   #voiceCb        = null
+  #pendingTracks  = []         // { track, stream, identityId, nostrPubkey } — buffered before onVoiceTrack registered
   #localTracks    = []         // { track, stream } queued before peer connects
   #lastHello      = 0          // timestamp — debounce re-broadcasts
   #heartbeatTimer = null
@@ -464,8 +465,13 @@ export class RemoteSync {
     peer.onMessage(msg => this.#handleDataMsg(msg, identityId))
 
     // Audio / video tracks → voice layer
+    // If onVoiceTrack hasn't been registered yet, buffer for later delivery.
     peer.onTrack((track, stream) => {
-      if (this.#voiceCb) this.#voiceCb(track, stream, identityId, nostrPubkey)
+      if (this.#voiceCb) {
+        this.#voiceCb(track, stream, identityId, nostrPubkey)
+      } else {
+        this.#pendingTracks.push({ track, stream, identityId, nostrPubkey })
+      }
     })
 
     // Data channel open → send intro
@@ -601,7 +607,15 @@ export class RemoteSync {
 
   onVoiceTrack (cb) {
     this.#voiceCb = cb
-    // Replay tracks that already arrived before this callback was registered
+
+    // Drain buffered tracks that arrived before this callback was registered
+    const pending = this.#pendingTracks.splice(0)
+    for (const { track, stream, identityId, nostrPubkey } of pending) {
+      if (track.readyState !== 'ended') cb(track, stream, identityId, nostrPubkey)
+    }
+
+    // Also replay via getReceivers() for any tracks not caught by the buffer
+    // (e.g. tracks that arrived before this peer entry was created)
     for (const [nostrPubkey, { identityId, peer }] of this.#peers) {
       for (const receiver of peer.pc.getReceivers()) {
         const t = receiver.track
