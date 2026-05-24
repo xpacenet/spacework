@@ -18,11 +18,13 @@
  *   status       detail: { peerCount }
  */
 
-import { RemoteSync }   from './remote.js'
-import { TrysteroSync } from './trysteroSync.js'
-import { getIdentity }  from '../identity/index.js'
-import { connLog }      from './connectionLog.js'
-export { connLog }
+import { RemoteSync }    from './remote.js'
+import { TrysteroSync }  from './trysteroSync.js'
+import { getIdentity }   from '../identity/index.js'
+import { connLog }       from './connectionLog.js'
+import { presenceStore } from './presenceStore.js'
+
+export { connLog, presenceStore }
 
 export class SpaceSync extends EventTarget {
   #remote   = null
@@ -72,34 +74,74 @@ export class SpaceSync extends EventTarget {
     this.#wireListeners()
   }
 
+  /**
+   * Wire all event handlers from the active transport (RemoteSync or TrysteroSync)
+   * to SpaceSync's own CustomEvent surface, and also update presenceStore in
+   * parallel for richer cached state and TTL tracking.
+   *
+   * Flow summary:
+   *   transport fires event  →  SpaceSync emits CustomEvent  →  UI reacts
+   *                          →  presenceStore.upsertPeer()   →  snapshot & TTL
+   *
+   * The two paths (CustomEvent + presenceStore) are independent — presenceStore
+   * updates never block or delay UI events.
+   */
   #wireListeners () {
     const r = this.#remote
 
+    // ── Peer join ──────────────────────────────────────────────────────────────
     r.on('HELLO', ({ from, username: u, presetId: pid = 0, status: st = 'available' }) => {
       if (this.#peers.has(from)) return
       this.#addPeer(from, u, pid, st)
+
+      // Seed presenceStore with v=0 for a new peer.
+      // Future delta messages with v > 0 will apply version-diff updates.
+      presenceStore.upsertPeer(from, { username: u, presetId: pid, status: st, v: 0 })
     })
 
-    r.on('PEER_LEAVE', ({ from }) => this.#removePeer(from))
+    // ── Peer leave (graceful) ──────────────────────────────────────────────────
+    r.on('PEER_LEAVE', ({ from }) => {
+      this.#removePeer(from)
+      presenceStore.removePeer(from)
+    })
 
+    // ── Position update (high-frequency, ~20 Hz) ───────────────────────────────
     r.on('MOVE', ({ from, pos }) => {
       this.#emit('peer:move', { peerId: from, pos })
+      // Direct in-place position update — no event emitted from store,
+      // no version check needed (last-write-wins for positions)
+      presenceStore.updatePos(from, pos)
     })
 
+    // ── Avatar change ──────────────────────────────────────────────────────────
     r.on('AVATAR_CHANGE', ({ from, presetId: pid }) => {
       this.#emit('peer:avatar', { peerId: from, presetId: pid })
+      // presenceStore is already patched inside remote.js / trysteroSync.js
+      // immediately after they fire this event — no double update needed here
     })
 
+    // ── Status change ──────────────────────────────────────────────────────────
     r.on('STATUS_CHANGE', ({ from, status: st }) => {
       this.#emit('peer:status', { peerId: from, status: st })
+      // presenceStore is patched inside the transport layer (see above)
     })
 
+    // ── Talking indicator ──────────────────────────────────────────────────────
     r.on('PEER_TALKING', ({ from, talking }) => {
       this.#emit('peer:talking', { peerId: from, talking })
     })
 
+    // ── Chat ───────────────────────────────────────────────────────────────────
     r.on('CHAT', ({ from, username: u, text, ts }) => {
       this.#emit('chat', { from, username: u, text, ts })
+    })
+
+    // ── TTL expiry (crashed peer, no graceful bye) ─────────────────────────────
+    // When a peer's 60 s TTL expires without a heartbeat, presenceStore fires
+    // `peer:expired`.  We treat it like a PEER_LEAVE for UI cleanup.
+    presenceStore.addEventListener('peer:expired', ({ detail: { peerId } }) => {
+      if (!this.#peers.has(peerId)) return
+      this.#removePeer(peerId)
     })
   }
 
@@ -108,6 +150,9 @@ export class SpaceSync extends EventTarget {
     this.#remote = null
     this.#peers.clear()
     this.#started = false
+    // Clear HOT tier so stale peer data does not pollute a future session.
+    // COLD tier is left intact — room summaries remain valid across sessions.
+    presenceStore.clearHot()
   }
 
   // ── Outbound ──────────────────────────────────────────────────────────────

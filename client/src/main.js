@@ -11,7 +11,7 @@ import { VisibilityLayer, VISIBILITY } from './network/visibility.js'
 import { openNetworkMap }    from './ui/networkMap.js'
 import { ProximityVoice }   from './ui/proximityVoice.js'
 import { PresencePanel }    from './ui/presencePanel.js'
-import { spaceSync, connLog } from './sync/index.js'
+import { spaceSync, connLog, presenceStore } from './sync/index.js'
 import { loadIdentity, getIdentity } from './identity/index.js'
 import { setRoomName, currentRoomName, discoverActiveRooms } from './sync/remote.js'
 import { createRoomLink } from './sync/roomLink.js'
@@ -486,8 +486,20 @@ import { WorldHistory }      from './universe/index.js'
         const { peerId, username: peerName, presetId: peerPreset } = e.detail
         _peerUsernames.set(peerId, peerName)
         if (_avatars.has(peerId)) return
+
         const resolvedPreset = peerPreset ?? _presetFromId(peerId)
         const av = createLocalAvatar(peerName, resolvedPreset)
+
+        // If presenceStore already has a cached position for this peer
+        // (from a state snapshot received before the direct connection was
+        // established), place the avatar there immediately instead of the
+        // world origin — prevents a visible "snap" on first MOVE message.
+        const cached = presenceStore.getPeer(peerId)
+        if (cached?.pos) {
+          av.position.set(cached.pos.x, cached.pos.y ?? 0, cached.pos.z)
+          if (cached.pos.ry !== undefined) av.rotation.y = cached.pos.ry
+        }
+
         scene.add(av)
         _avatars.set(peerId, av)
         _updateOnlineCount(hud, _avatars.size + 1)

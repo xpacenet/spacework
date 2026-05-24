@@ -19,14 +19,16 @@
  *   3. ws://localhost:4002 (local dev default)
  */
 
-import { getIdentity } from '../identity/index.js'
+import { getIdentity }    from '../identity/index.js'
 import {
   parseCurrentLink,
   createRoomLink,
   recordPeer,
   setRoomNameInUrl,
 } from './roomLink.js'
-import { connLog } from './connectionLog.js'
+import { connLog }         from './connectionLog.js'
+import { presenceStore }   from './presenceStore.js'
+import { idleScheduler }   from './idleScheduler.js'
 
 // ── xpacenode URL ─────────────────────────────────────────────────────────────
 // Returns null if no node is configured — triggers DHT fallback in SpaceSync.
@@ -324,6 +326,15 @@ export class RemoteSync {
   #localTracks    = []
   #heartbeatTimer = null
 
+  /**
+   * Own monotonic version counter.
+   *
+   * Incremented each time our local state changes (avatar, status).
+   * Sent inside every `delta` message so recipients can apply version-diff
+   * logic — a delta with v ≤ stored.v is silently dropped by presenceStore.
+   */
+  #myVersion = 0
+
   constructor (username, presetId = 0, status = 'available') {
     this.#username = username
     this.#presetId = presetId
@@ -432,10 +443,23 @@ export class RemoteSync {
       status:   this.#status,
     })
 
-    // Heartbeat every 30 s so the node doesn't prune us
+    // Heartbeat every 30 s — two purposes:
+    //   1. Keep-alive to xpacenode (prevents server-side peer pruning)
+    //   2. Peer-to-peer heartbeat through data channels (resets TTL in remote presenceStore)
     this.#heartbeatTimer = setInterval(() => {
+      // xpacenode keep-alive
       this.#pool.send({ t: 'hb', roomId: this.#roomId })
+
+      // Peer heartbeat: each connected peer resets our 60 s TTL in their store
+      const hb = { type: 'hb', identityId: this.#selfId() }
+      for (const { peer } of this.#peers.values()) peer.send(hb)
     }, 30_000)
+
+    // Schedule idle-time housekeeping: prune stale COLD-tier entries
+    idleScheduler.schedule(
+      () => presenceStore.pruneCold(),
+      'prune-cold-rooms',
+    )
   }
 
   stop () {
@@ -475,7 +499,10 @@ export class RemoteSync {
       }
     })
 
-    // Data channel open → send intro + record this peer for future direct connections
+    // Data channel open:
+    //   1. Send intro (our identity + display state)
+    //   2. Send state_req (ask peer for their full presence snapshot)
+    //   3. Record peerId for future direct reconnections
     peer.addEventListener('open', () => {
       peer.send({
         type:       'intro',
@@ -484,6 +511,12 @@ export class RemoteSync {
         presetId:   this.#presetId,
         status:     this.#status,
       })
+
+      // Request the peer's HOT snapshot — gives us immediate knowledge of
+      // everyone they are connected to, populating the room before we've
+      // established direct connections to each peer ourselves.
+      peer.send({ type: 'state_req', identityId: this.#selfId() })
+
       recordPeer(this.#roomId, peerId)
     })
 
@@ -506,9 +539,36 @@ export class RemoteSync {
 
   // ── Data channel message dispatch ─────────────────────────────────────────
 
+  /**
+   * Route an incoming data-channel message from `fallbackId` (the RTCPeer map
+   * key for this connection).
+   *
+   * Message types and their purpose:
+   *
+   *   Legacy messages (unchanged from v2):
+   *     intro       — peer identity announcement (fires HELLO)
+   *     move        — position update (fires MOVE, ~20 Hz)
+   *     chat        — text message
+   *     avatar      — avatar preset change
+   *     status      — presence status change
+   *     talking     — mic activity flag
+   *     bye         — graceful disconnect
+   *
+   *   Presence-sync messages (new in v3):
+   *     hb          — peer heartbeat; resets the sender's 60 s TTL in our store
+   *     state_req   — request for our full HOT-tier snapshot
+   *     state       — snapshot response; bulk-populates presenceStore
+   *     delta       — version-gated state update (avatar/status with version)
+   *
+   * @param {object} msg         — parsed JSON from data channel
+   * @param {string} fallbackId  — RTCPeer map key (= peerId when identityId absent)
+   */
   #handleDataMsg (msg, fallbackId) {
     const from = msg.identityId ?? fallbackId
+
     switch (msg.type) {
+      // ── Legacy messages ──────────────────────────────────────────────────────
+
       case 'intro':
         this.#fire('HELLO', {
           from,
@@ -517,24 +577,99 @@ export class RemoteSync {
           status:   msg.status   ?? 'available',
         })
         break
+
       case 'move':
         this.#fire('MOVE', { from, pos: msg.pos })
         break
+
       case 'chat':
         this.#fire('CHAT', { from, username: msg.username, text: msg.text, ts: msg.ts })
         break
+
       case 'avatar':
         this.#fire('AVATAR_CHANGE', { from, presetId: msg.presetId })
+        // Keep presenceStore in sync (direct patch — no version check needed,
+        // this is a point-to-point authoritative message from the peer)
+        presenceStore.patchPeer(from, { presetId: msg.presetId })
         break
+
       case 'status':
         this.#fire('STATUS_CHANGE', { from, status: msg.status })
+        presenceStore.patchPeer(from, { status: msg.status })
         break
+
       case 'talking':
         this.#fire('PEER_TALKING', { from, talking: !!msg.talking })
         break
+
       case 'bye':
         this.#fire('PEER_LEAVE', { from })
         break
+
+      // ── Presence-sync messages ───────────────────────────────────────────────
+
+      case 'hb':
+        // The peer is still alive — reset their TTL so they are not evicted.
+        // No SpaceSync event needed; the avatar stays in scene as normal.
+        presenceStore.heartbeat(from)
+        break
+
+      case 'state_req': {
+        // A peer joined and asked for our current room snapshot.
+        // Respond directly through their data channel with our HOT-tier data.
+        const snapshot   = presenceStore.getSnapshot()
+        const responder  = this.#peers.get(fallbackId)?.peer
+        responder?.send({
+          type:       'state',
+          identityId: this.#selfId(),
+          peers:      snapshot,
+        })
+        break
+      }
+
+      case 'state': {
+        // Received a snapshot from a peer.  Bulk-upsert into presenceStore and
+        // fire HELLO for any peers we have not yet connected to directly.
+        // This gives instant room population on join — we learn about everyone
+        // the sender knows, even before direct WebRTC connections are set up.
+        const myId  = this.#selfId()
+        const peers = msg.peers ?? {}
+
+        for (const [peerId, data] of Object.entries(peers)) {
+          if (peerId === myId) continue   // never overwrite our own state
+
+          const applied = presenceStore.upsertPeer(peerId, data)
+          if (applied && !this.#peers.has(peerId)) {
+            // Fire HELLO so SpaceSync creates an avatar immediately.
+            // The avatar will show the peer's last known position until
+            // their first direct MOVE message arrives.
+            this.#fire('HELLO', {
+              from:     peerId,
+              username: data.username ?? '',
+              presetId: data.presetId ?? 0,
+              status:   data.status   ?? 'available',
+            })
+          }
+        }
+        break
+      }
+
+      case 'delta': {
+        // Version-gated update — carries the sender's current version counter.
+        // presenceStore.upsertPeer drops it silently if delta.v ≤ stored.v,
+        // preventing stale or replayed deltas from reverting newer state.
+        const applied = presenceStore.upsertPeer(from, msg)
+        if (applied && !this.#peers.has(from)) {
+          // Unknown peer appeared via gossip — welcome them.
+          this.#fire('HELLO', {
+            from,
+            username: msg.username ?? '',
+            presetId: msg.presetId ?? 0,
+            status:   msg.status   ?? 'available',
+          })
+        }
+        break
+      }
     }
   }
 
@@ -555,14 +690,40 @@ export class RemoteSync {
 
   setAvatar (presetId) {
     this.#presetId = presetId
-    const msg = { type: 'avatar', identityId: this.#selfId(), presetId }
+    const selfId   = this.#selfId()
+
+    // Legacy `avatar` message — real-time UI update for all peers
+    const msg = { type: 'avatar', identityId: selfId, presetId }
     for (const { peer } of this.#peers.values()) peer.send(msg)
+
+    // Versioned `delta` — allows presenceStore version-diff on recipients.
+    // The bumped version ensures late-joining peers that receive a snapshot
+    // containing this peer see the latest avatar, not a stale one.
+    const delta = {
+      type:       'delta',
+      identityId: selfId,
+      presetId,
+      v: ++this.#myVersion,
+    }
+    for (const { peer } of this.#peers.values()) peer.send(delta)
   }
 
   setStatus (status) {
     this.#status = status
-    const msg = { type: 'status', identityId: this.#selfId(), status }
+    const selfId  = this.#selfId()
+
+    // Legacy `status` message — real-time UI update for all peers
+    const msg = { type: 'status', identityId: selfId, status }
     for (const { peer } of this.#peers.values()) peer.send(msg)
+
+    // Versioned `delta` — keeps snapshots accurate for late joiners
+    const delta = {
+      type:       'delta',
+      identityId: selfId,
+      status,
+      v: ++this.#myVersion,
+    }
+    for (const { peer } of this.#peers.values()) peer.send(delta)
   }
 
   broadcastTalking (talking) {

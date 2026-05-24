@@ -10,10 +10,12 @@
  * Everything after discovery is identical — direct WebRTC P2P.
  */
 
-import { joinRoom } from '@trystero-p2p/torrent'
-import { getIdentity } from '../identity/index.js'
-import { connLog } from './connectionLog.js'
-import { recordPeer } from './roomLink.js'
+import { joinRoom }       from '@trystero-p2p/torrent'
+import { getIdentity }    from '../identity/index.js'
+import { connLog }        from './connectionLog.js'
+import { recordPeer }     from './roomLink.js'
+import { presenceStore }  from './presenceStore.js'
+import { idleScheduler }  from './idleScheduler.js'
 
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -36,15 +38,29 @@ export class TrysteroSync {
   #voiceCb       = null
   #pendingTracks = []
 
-  // Trystero actions
-  #sendMove    = null
-  #sendChat    = null
-  #sendAvatar  = null
-  #sendStatus  = null
-  #sendTalking = null
-  #sendBye     = null
-  #sendIntro   = null
-  #knownPeers  = []
+  // Trystero actions — set during start(), used by outbound methods
+  #sendMove     = null
+  #sendChat     = null
+  #sendAvatar   = null
+  #sendStatus   = null
+  #sendTalking  = null
+  #sendBye      = null
+  #sendIntro    = null
+  #sendHb       = null    // peer heartbeat (resets TTL in remote presenceStore)
+  #sendStateReq = null    // request peer's HOT snapshot
+  #sendState    = null    // respond with our HOT snapshot
+  #sendDelta    = null    // version-gated state update
+
+  #knownPeers   = []
+
+  /**
+   * Own monotonic version counter — incremented on avatar/status changes.
+   * Sent with every `delta` so recipients can apply version-diff logic.
+   */
+  #myVersion    = 0
+
+  /** Timer ID for the peer heartbeat interval (every 30 s). */
+  #hbTimer      = null
 
   constructor (username, presetId = 0, status = 'available') {
     this.#username = username
@@ -76,21 +92,33 @@ export class TrysteroSync {
     )
 
     // ── Actions (typed data channel messages) ─────────────────────────────────
-    const [sendIntro,   onIntro]   = this.#room.makeAction('intro')
-    const [sendMove,    onMove]    = this.#room.makeAction('move')
-    const [sendChat,    onChat]    = this.#room.makeAction('chat')
-    const [sendAvatar,  onAvatar]  = this.#room.makeAction('avatar')
-    const [sendStatus,  onStatus]  = this.#room.makeAction('status')
-    const [sendTalking, onTalking] = this.#room.makeAction('talking')
-    const [sendBye,     onBye]     = this.#room.makeAction('bye')
+    // Each makeAction returns [send, onReceive] for a named typed channel.
+    // Legacy actions (identical interface to the old DHT/Nostr transport):
+    const [sendIntro,    onIntro]    = this.#room.makeAction('intro')
+    const [sendMove,     onMove]     = this.#room.makeAction('move')
+    const [sendChat,     onChat]     = this.#room.makeAction('chat')
+    const [sendAvatar,   onAvatar]   = this.#room.makeAction('avatar')
+    const [sendStatus,   onStatus]   = this.#room.makeAction('status')
+    const [sendTalking,  onTalking]  = this.#room.makeAction('talking')
+    const [sendBye,      onBye]      = this.#room.makeAction('bye')
 
-    this.#sendMove    = sendMove
-    this.#sendChat    = sendChat
-    this.#sendAvatar  = sendAvatar
-    this.#sendStatus  = sendStatus
-    this.#sendTalking = sendTalking
-    this.#sendBye     = sendBye
-    this.#sendIntro   = sendIntro
+    // Presence-sync actions (new in v3):
+    const [sendHb,       onHb]       = this.#room.makeAction('hb')       // peer heartbeat
+    const [sendStateReq, onStateReq] = this.#room.makeAction('stateReq') // request snapshot
+    const [sendState,    onState]    = this.#room.makeAction('state')    // snapshot response
+    const [sendDelta,    onDelta]    = this.#room.makeAction('delta')    // version-gated update
+
+    this.#sendMove     = sendMove
+    this.#sendChat     = sendChat
+    this.#sendAvatar   = sendAvatar
+    this.#sendStatus   = sendStatus
+    this.#sendTalking  = sendTalking
+    this.#sendBye      = sendBye
+    this.#sendIntro    = sendIntro
+    this.#sendHb       = sendHb
+    this.#sendStateReq = sendStateReq
+    this.#sendState    = sendState
+    this.#sendDelta    = sendDelta
 
     // ── Peer join ──────────────────────────────────────────────────────────────
     this.#room.onPeerJoin(peerId => {
@@ -100,13 +128,17 @@ export class TrysteroSync {
       connLog.peerJoined(peerId.slice(0, 10))
       if (isKnown) connLog.info(`✓ Known peer reconnected via DHT`)
 
-      // Send our intro immediately
+      // Send our intro immediately (identity + display state)
       sendIntro({
         identityId: this.#selfId(),
         username:   this.#username,
         presetId:   this.#presetId,
         status:     this.#status,
       }, [peerId])
+
+      // Request their full HOT snapshot so we can populate the room
+      // immediately, even before direct connections to all other peers
+      sendStateReq({ identityId: this.#selfId() }, [peerId])
 
       if (!this.#peers.has(peerId)) {
         this.#peers.set(peerId, { peerId, username: '', presetId: 0, status: 'available' })
@@ -128,13 +160,66 @@ export class TrysteroSync {
       this.#fire('HELLO', { from: id, username, presetId, status })
     })
 
-    // ── Data channel messages ──────────────────────────────────────────────────
-    onMove(    ({ pos }, from) => this.#fire('MOVE',         { from, pos }))
-    onChat(    (msg,    from) => this.#fire('CHAT',         { from, username: msg.username, text: msg.text, ts: msg.ts }))
-    onAvatar(  ({ presetId }, from) => this.#fire('AVATAR_CHANGE',  { from, presetId }))
-    onStatus(  ({ status },   from) => this.#fire('STATUS_CHANGE',  { from, status }))
-    onTalking( ({ talking },  from) => this.#fire('PEER_TALKING',   { from, talking: !!talking }))
-    onBye(     (_,            from) => this.#fire('PEER_LEAVE',     { from }))
+    // ── Legacy data channel messages ──────────────────────────────────────────
+    onMove(    ({ pos },      from) => this.#fire('MOVE',          { from, pos }))
+    onChat(    (msg,          from) => this.#fire('CHAT',          { from, username: msg.username, text: msg.text, ts: msg.ts }))
+    onTalking( ({ talking },  from) => this.#fire('PEER_TALKING',  { from, talking: !!talking }))
+    onBye(     (_,            from) => this.#fire('PEER_LEAVE',    { from }))
+
+    onAvatar(({ presetId }, from) => {
+      this.#fire('AVATAR_CHANGE', { from, presetId })
+      // Keep presenceStore in sync (direct patch — point-to-point, authoritative)
+      presenceStore.patchPeer(from, { presetId })
+    })
+
+    onStatus(({ status }, from) => {
+      this.#fire('STATUS_CHANGE', { from, status })
+      presenceStore.patchPeer(from, { status })
+    })
+
+    // ── Presence-sync messages ─────────────────────────────────────────────────
+
+    // Heartbeat: reset the sender's TTL so they're not evicted as crashed
+    onHb((_msg, from) => {
+      presenceStore.heartbeat(from)
+    })
+
+    // State request: a peer just joined and wants our full room snapshot
+    onStateReq((_msg, from) => {
+      const snapshot = presenceStore.getSnapshot()
+      sendState({ identityId: this.#selfId(), peers: snapshot }, [from])
+    })
+
+    // State snapshot: bulk-populate presenceStore and fire HELLO for new peers
+    onState(({ peers = {} }, _from) => {
+      const myId = this.#selfId()
+      for (const [peerId, data] of Object.entries(peers)) {
+        if (peerId === myId) continue
+
+        const applied = presenceStore.upsertPeer(peerId, data)
+        if (applied && !this.#peers.has(peerId)) {
+          this.#fire('HELLO', {
+            from:     peerId,
+            username: data.username ?? '',
+            presetId: data.presetId ?? 0,
+            status:   data.status   ?? 'available',
+          })
+        }
+      }
+    })
+
+    // Delta: version-gated state update from a peer
+    onDelta((msg, from) => {
+      const applied = presenceStore.upsertPeer(from, msg)
+      if (applied && !this.#peers.has(from)) {
+        this.#fire('HELLO', {
+          from,
+          username: msg.username ?? '',
+          presetId: msg.presetId ?? 0,
+          status:   msg.status   ?? 'available',
+        })
+      }
+    })
 
     // ── Audio tracks ───────────────────────────────────────────────────────────
     this.#room.onPeerStream((stream, peerId) => {
@@ -147,16 +232,31 @@ export class TrysteroSync {
       }
     })
 
+    // Peer heartbeat — every 30 s, broadcast our identity so all connected
+    // peers reset our TTL in their presenceStore (prevents false "crash" eviction)
+    this.#hbTimer = setInterval(() => {
+      this.#sendHb?.({ identityId: this.#selfId() })
+    }, 30_000)
+
+    // Schedule idle housekeeping for background room cleanup
+    idleScheduler.schedule(
+      () => presenceStore.pruneCold(),
+      'prune-cold-rooms',
+    )
+
     connLog.ok(dhtId, 'DHT ready — searching for peers')
     connLog.info('Searching for peers in room…')
     connLog.startFirstTimer(15_000)   // longer timeout for DHT (slower than xpacenode)
   }
 
   stop () {
+    clearInterval(this.#hbTimer)
+    this.#hbTimer = null
     this.#sendBye?.()
     this.#room?.leave()
     this.#room  = null
     this.#peers.clear()
+    idleScheduler.clear()
   }
 
   // ── Outbound ──────────────────────────────────────────────────────────────────
@@ -171,12 +271,17 @@ export class TrysteroSync {
 
   setAvatar (presetId) {
     this.#presetId = presetId
+    // Legacy avatar message — real-time UI update for all current peers
     this.#sendAvatar?.({ presetId })
+    // Versioned delta — ensures late-joining peers receive our latest avatar
+    // even when they join after this change happened
+    this.#sendDelta?.({ identityId: this.#selfId(), presetId, v: ++this.#myVersion })
   }
 
   setStatus (status) {
     this.#status = status
     this.#sendStatus?.({ status })
+    this.#sendDelta?.({ identityId: this.#selfId(), status, v: ++this.#myVersion })
   }
 
   broadcastTalking (talking) {

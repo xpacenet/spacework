@@ -121,13 +121,95 @@ VITE_XPACENODE_URL=wss://node.yourdomain.com npm run build
 
 ---
 
+## Presence sync architecture
+
+SpaceWork keeps the list of who is in a room accurate and lightweight using a
+**two-tier presence memory** and a **three-tier timing model**.
+
+### Two-tier memory
+
+| Tier | What | Fields | Size |
+|---|---|---|---|
+| **HOT** | Current room | username, presetId, status, pos, version | O(peers) |
+| **COLD** | Other known rooms | roomHash, peerCount, lastSeen | Capped at 20 |
+
+The HOT tier is always up-to-date and full-fidelity. The COLD tier is a lightweight
+summary so you can see what other rooms exist without loading them.
+
+### Three-tier timing
+
+| Tier | Trigger | Message | Purpose |
+|---|---|---|---|
+| 0 — real-time | Any state change | `delta` + `avatar`/`status` | Immediate UI update |
+| 1 — heartbeat | Every 30 s | `hb` | Reset TTL, prevent ghost avatars |
+| 2 — background | Browser idle time | COLD prune | Housekeeping, zero jank |
+
+### How it connects
+
+```
+Peer joins
+  └─→ state_req sent to each new connection
+        └─→ peer responds with state (full HOT snapshot)
+              └─→ presenceStore.upsertPeer() [version-diff guard]
+                    └─→ HELLO fired for unknown peers → avatar created immediately
+
+Own state changes (avatar / status)
+  └─→ legacy message (avatar / status) → real-time UI on existing peers
+  └─→ versioned delta                  → late-joining peers get correct state
+
+Every 30 s
+  └─→ hb sent to all peers → they reset our 60 s TTL
+  └─→ if TTL expires without hb → peer:expired → avatar removed (crash cleanup)
+
+Browser idle
+  └─→ idleScheduler runs presenceStore.pruneCold() → old room summaries cleared
+```
+
+### Version diff (CRDT-lite)
+
+Every `delta` message carries a monotonic version counter (`v`).
+`presenceStore.upsertPeer()` drops the update silently if `incoming.v ≤ stored.v`.
+This means:
+
+- Replayed or out-of-order deltas are harmless
+- Late-joining peers always converge to current state, not stale state
+- No coordination needed — each peer owns their own version counter
+
+### Cost invariant
+
+```
+O(peers in current room) + O(1 per capped background room)
+```
+
+Memory and CPU usage never grows with total network size. A room with 10 people
+has the same cost whether xpacenet has 10 or 10 million global users.
+
+### Source files
+
+| File | Role |
+|---|---|
+| `sync/presenceStore.js` | Two-tier HOT/COLD store, TTL timers, version diff |
+| `sync/idleScheduler.js` | requestIdleCallback queue, overflow protection |
+| `sync/remote.js` | xpacenode path — hb / state_req / state / delta handling |
+| `sync/trysteroSync.js` | DHT path — same protocol via Trystero makeAction |
+| `sync/index.js` | SpaceSync — wires transport events to presenceStore |
+
+---
+
 ## Project structure
 
 ```
 spacework/
 ├── client/                  # Vite frontend (SpaceWork app)
 │   ├── src/
-│   │   ├── sync/            # P2P layer (xpacenode pool, WebRTC peers, SpaceSync)
+│   │   ├── sync/            # P2P + presence layer
+│   │   │   ├── index.js         # SpaceSync — main public interface
+│   │   │   ├── remote.js        # xpacenode WebSocket + WebRTC transport
+│   │   │   ├── trysteroSync.js  # BitTorrent DHT fallback transport
+│   │   │   ├── presenceStore.js # Two-tier HOT/COLD peer memory
+│   │   │   ├── idleScheduler.js # requestIdleCallback task queue
+│   │   │   ├── roomLink.js      # Encoded invite link encode/decode
+│   │   │   └── connectionLog.js # Real-time connection step log
 │   │   ├── scene/           # Three.js scene, lighting, ship
 │   │   ├── player/          # Camera + movement
 │   │   └── main.js          # Entry point + HUD wiring
