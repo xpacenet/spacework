@@ -32,10 +32,11 @@ export class ProximityVoice {
     this._talking      = new Set()     // identityIds currently talking (+ 'self')
     this._selfAnalyser = null          // AnalyserNode for local mic level
     this._selfBuf      = null          // Uint8Array for self analyser
-    this._muted        = false
-    this._active       = false
+    this._muted          = false
+    this._active         = false
     this._onStateChange  = null
     this._onTalkChange   = null        // callback(Set<identityId>) on change
+    this._onSelfTalkChange = null      // callback(bool) when self talking toggles
     this._syncRef        = null        // stored for pending re-keying
   }
 
@@ -164,7 +165,8 @@ export class ProximityVoice {
     }
 
     // ── Self talking detection ────────────────────────────────────────────────
-    const prevTalking = new Set(this._talking)
+    const prevTalking  = new Set(this._talking)
+    const wasSelf      = prevTalking.has('self')
     if (this._selfAnalyser && !this._muted) {
       this._selfAnalyser.getByteFrequencyData(this._selfBuf)
       const rms = this._selfBuf.reduce((a, b) => a + b, 0) / this._selfBuf.length
@@ -173,6 +175,8 @@ export class ProximityVoice {
     } else {
       this._talking.delete('self')
     }
+    const isSelf = this._talking.has('self')
+    if (isSelf !== wasSelf) this._onSelfTalkChange?.(isSelf)
 
     // ── Remote peer gain + talking detection ─────────────────────────────────
     peerAvatars.forEach((av, identityId) => {
@@ -237,8 +241,10 @@ export class ProximityVoice {
   /** Returns the Set of all currently-talking identityIds (including 'self'). */
   get talkingPeers () { return this._talking }
 
-  onStateChange (cb)  { this._onStateChange = cb }
-  onTalkChange  (cb)  { this._onTalkChange  = cb }
+  onStateChange    (cb) { this._onStateChange    = cb }
+  onTalkChange     (cb) { this._onTalkChange     = cb }
+  /** Called with (bool) whenever the local user starts or stops talking. */
+  onSelfTalkChange (cb) { this._onSelfTalkChange = cb }
 
   _notify     () { this._onStateChange?.({ active: this._active, muted: this._muted }) }
   _notifyTalk () { this._onTalkChange?.(this._talking) }

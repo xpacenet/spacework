@@ -549,6 +549,9 @@ export class RemoteSync {
       case 'status':
         this.#fire('STATUS_CHANGE', { from, status: msg.status })
         break
+      case 'talking':
+        this.#fire('PEER_TALKING', { from, talking: !!msg.talking })
+        break
       case 'bye':
         this.#fire('PEER_LEAVE', { from })
         break
@@ -616,6 +619,11 @@ export class RemoteSync {
   setStatus (status) {
     this.#status = status
     const msg = { type: 'status', identityId: this.#selfId(), status }
+    for (const { peer } of this.#peers.values()) peer.send(msg)
+  }
+
+  broadcastTalking (talking) {
+    const msg = { type: 'talking', identityId: this.#selfId(), talking: !!talking }
     for (const { peer } of this.#peers.values()) peer.send(msg)
   }
 

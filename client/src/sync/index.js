@@ -67,6 +67,11 @@ export class SpaceSync extends EventTarget {
       this.#emit('peer:status', { peerId: from, status: st })
     })
 
+    // ── Peer talking (data-channel broadcast) ────────────────────────────────
+    this.#remote.on('PEER_TALKING', ({ from, talking }) => {
+      this.#emit('peer:talking', { peerId: from, talking })
+    })
+
     // ── Chat ──────────────────────────────────────────────────────────────────
     this.#remote.on('CHAT', ({ from, username: u, text, ts }) => {
       this.#emit('chat', { from, username: u, text, ts })
@@ -105,9 +110,10 @@ export class SpaceSync extends EventTarget {
   }
 
   // ── Proximity voice ───────────────────────────────────────────────────────
-  addVoiceTrack (track, stream)    { this.#remote?.addVoiceTrack(track, stream) }
-  onVoiceTrack  (cb)               { this.#remote?.onVoiceTrack(cb) }
+  addVoiceTrack    (track, stream) { this.#remote?.addVoiceTrack(track, stream) }
+  onVoiceTrack     (cb)            { this.#remote?.onVoiceTrack(cb) }
   wireToIdentityId (wirePeerId)    { return this.#remote?.wireToIdentityId(wirePeerId) }
+  broadcastTalking (talking)       { this.#remote?.broadcastTalking(talking) }
 
   // ── Internal ──────────────────────────────────────────────────────────────
 

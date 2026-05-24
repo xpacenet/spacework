@@ -368,7 +368,18 @@ import { WorldHistory }      from './universe/index.js'
         presence.updatePeerStatus(peerId, status)
       })
 
+      // ── Talking ring — driven by data-channel broadcast, not local audio analysis ──
+      // Each device detects its own mic level, then broadcasts talking=true/false.
+      // Remote peers update the ring from the message instead of reading 0-RMS analysers.
+      spaceSync.addEventListener('peer:talking', e => {
+        const { peerId, talking } = e.detail
+        const av = _avatars.get(peerId)
+        if (av) av.userData._isTalking = talking
+      })
+
       // Peer walk + talking animation loop
+      // Remote talking state is driven by data-channel messages (see peer:talking below)
+      // rather than local audio analysis (which reads 0 RMS for remote WebRTC tracks).
       let _peerTickLast = performance.now()
       ;(function _tickPeers () {
         requestAnimationFrame(_tickPeers)
@@ -378,9 +389,10 @@ import { WorldHistory }      from './universe/index.js'
         const clock = now / 1000
         _avatars.forEach((av, peerId) => {
           animateWalk(av, av.userData.isMoving ?? false, delta)
-          setAvatarTalking(av, voice.isTalking(peerId), clock)
+          // _isTalking is set by the peer:talking event (data channel broadcast)
+          setAvatarTalking(av, av.userData._isTalking ?? false, clock)
         })
-        // Local avatar talking ring
+        // Local avatar talking ring (self-analyser is reliable)
         player.setSelfTalking(voice.isTalking('self'), clock)
       })()
 
@@ -411,6 +423,12 @@ import { WorldHistory }      from './universe/index.js'
       // Push talking set to all 2D views whenever it changes
       voice.onTalkChange(talkingSet => {
         player.setTalkingPeers(talkingSet)
+      })
+
+      // Broadcast our own talking state to all peers via data channel
+      // (remote analysers always read 0 RMS — each device must self-report)
+      voice.onSelfTalkChange(talking => {
+        spaceSync.broadcastTalking(talking)
       })
 
       if (voiceBtn) {
