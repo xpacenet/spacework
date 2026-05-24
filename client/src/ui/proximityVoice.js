@@ -19,8 +19,8 @@
  *   identityId in update() once the sync layer resolves them.
  */
 
-const HEAR_NEAR    = 8     // metres — full volume inside this radius
-const HEAR_FAR     = 18    // metres — completely silent outside this radius
+const HEAR_NEAR    = 20    // metres — full volume inside this radius
+const HEAR_FAR     = 50    // metres — completely silent outside this radius
 const GAIN_SPEED   = 0.08  // time-constant for gain smoothing (seconds)
 const TALK_THRESH  = 12    // 0-255 RMS threshold for "talking" detection
 
@@ -145,15 +145,17 @@ export class ProximityVoice {
   update (localPos, peerAvatars) {
     if (!this._active || !this._ctx) return
 
-    // ── Re-key any entries that were stored under a wire fallback ────────────
+    // ── Re-key any entries stored under a Nostr pubkey fallback ─────────────
+    // Both Nostr pubkeys and Ed25519 peerIds are 64-char hex, so we can't
+    // distinguish by length. Instead ask the sync layer to resolve any key —
+    // if it's a known Nostr pubkey it returns the stable Ed25519 peerId;
+    // if it's already an Ed25519 peerId wireToIdentityId returns it unchanged.
     if (this._syncRef) {
       this._gains.forEach((entry, key) => {
-        if (key.length !== 64) {  // wire IDs are shorter than 64-char Ed25519 hex
-          const resolved = this._syncRef.wireToIdentityId(key)
-          if (resolved && resolved !== key) {
-            this._gains.set(resolved, entry)
-            this._gains.delete(key)
-          }
+        const resolved = this._syncRef.wireToIdentityId(key)
+        if (resolved && resolved !== key) {
+          this._gains.set(resolved, entry)
+          this._gains.delete(key)
         }
       })
     }

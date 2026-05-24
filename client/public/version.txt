@@ -1,1 +1,1 @@
-2026-05-24T11:00 fix: ignore stale heartbeats replayed by relays (90s cutoff)
+2026-05-24T12:00 fix: audio silent — re-keying bug + spawn-distance kills gain
