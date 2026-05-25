@@ -112,12 +112,16 @@ import { WorldHistory }      from './universe/index.js'
     }
   })
 
-  // Auto-dismiss 6s after first peer connects
+  // Auto-dismiss 6s after first peer connects.
+  // Use a tracked timer — joining a room with many people would otherwise
+  // queue one setTimeout per peer:join event, all firing at nearly the same time.
+  let _dismissTimer = null
   spaceSync.addEventListener('peer:join', () => {
     title.textContent = '⬡ Connected'
     panel.style.borderColor = ''
     document.getElementById('cl-host-share')?.remove()
-    setTimeout(hide, 6000)
+    clearTimeout(_dismissTimer)
+    _dismissTimer = setTimeout(hide, 6000)
   })
 })()
 
@@ -133,10 +137,12 @@ import { WorldHistory }      from './universe/index.js'
   // ── P2P status indicator ────────────────────────────────────────────────────
   let _syncStarted = false
   function updateSyncDot ({ peerCount } = {}) {
+    // Update every P2P status dot on the page (lobby + HUD share the same class)
     document.querySelectorAll('.ipfs-dot').forEach(dot => {
       dot.className = 'ipfs-dot green'
     })
-    document.querySelectorAll('#ipfs-label').forEach(el => {
+    // Update every P2P status label — using class selector to avoid duplicate-ID issues
+    document.querySelectorAll('.ipfs-label').forEach(el => {
       el.textContent = `P2P · ${identity.shortId}`
     })
     if (peerCount !== undefined) {
@@ -223,12 +229,48 @@ import { WorldHistory }      from './universe/index.js'
         `room-${Math.random().toString(36).slice(2, 7)}`
       setRoomName(roomName)
 
-      // Generate and copy the invite link immediately
+      // Generate invite link and attempt to copy it to clipboard.
+      // Give the user clear feedback whether it worked — clipboard permission
+      // is often denied on first visit and the silent failure leaves them stuck.
       try {
         const { createRoomLink: makeLink } = await import('./sync/roomLink.js')
         const { link: inviteLink } = await makeLink({ roomId: roomName })
-        await navigator.clipboard.writeText(inviteLink).catch(() => {})
-      } catch { /* clipboard denied, not critical */ }
+
+        const copied = await navigator.clipboard.writeText(inviteLink)
+          .then(() => true)
+          .catch(() => false)
+
+        if (copied) {
+          // Brief inline feedback on the button itself
+          const prev = createBtn.textContent
+          createBtn.textContent = '✅ Link copied!'
+          createBtn.disabled = true
+          setTimeout(() => {
+            createBtn.textContent = prev
+            createBtn.disabled = false
+          }, 1800)
+        } else {
+          // Clipboard denied — show the link so the user can copy it manually
+          const linkEl = document.createElement('div')
+          linkEl.style.cssText = `
+            width:100%;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);
+            border-radius:8px;padding:8px 12px;font-size:0.72rem;word-break:break-all;
+            color:#aac8ff;cursor:pointer;margin-top:-6px;text-align:left;
+          `
+          linkEl.textContent = inviteLink
+          linkEl.title = 'Click to select all'
+          linkEl.addEventListener('click', () => {
+            const range = document.createRange()
+            range.selectNodeContents(linkEl)
+            const sel = window.getSelection()
+            sel.removeAllRanges()
+            sel.addRange(range)
+          })
+          createBtn.parentElement.insertBefore(linkEl, createBtn.nextSibling)
+          // Auto-remove after 20s or when the scene loads
+          setTimeout(() => linkEl.remove(), 20_000)
+        }
+      } catch { /* link generation failed — not critical */ }
 
       startBoarding(username)
     })
@@ -318,7 +360,9 @@ import { WorldHistory }      from './universe/index.js'
         if (roomInput) roomInput.value = btn.dataset.room
       })
     })
-  }).then(stop => { _stopDiscover = stop })
+  })
+  .then(stop  => { _stopDiscover = stop })
+  .catch(() => { /* node not configured — active rooms list stays hidden */ })
 
   // ── Enter key shortcuts ──────────────────────────────────────────────────────
   usernameInput?.addEventListener('keydown', e => {

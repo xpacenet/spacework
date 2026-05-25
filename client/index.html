@@ -194,8 +194,10 @@
       .vtbtn:hover:not(.active) { color: rgba(255,255,255,0.75); }
 
       /* ── Connection log panel ─────────────────────────────────────────────── */
+      /* Positioned bottom-RIGHT so it never overlaps the presence panel,
+         minimap, or ipfs-status which all live on the left side. */
       #conn-log {
-        position: fixed; bottom: 20px; left: 20px; z-index: 300;
+        position: fixed; bottom: 20px; right: 20px; z-index: 300;
         width: 320px; max-width: calc(100vw - 40px);
         background: rgba(10,12,24,0.92);
         border: 1px solid rgba(80,120,255,0.25);
@@ -473,6 +475,9 @@
 
         /* IPFS status: above bar */
         #ipfs-status { bottom: 70px; }
+
+        /* Connection log: above bar (dismiss button was behind the 60px bar) */
+        #conn-log { bottom: 72px; right: 8px; max-width: calc(100vw - 16px); }
 
         /* Zone banner: above bar */
         #zone-banner { padding-bottom: 76px; }
@@ -1062,8 +1067,8 @@
 
         <!-- Identity fingerprint + P2P status -->
         <div style="margin-top:8px;display:flex;align-items:center;gap:8px;justify-content:center;font-size:0.68rem;color:rgba(255,255,255,0.4);letter-spacing:0.04em">
-          <div class="ipfs-dot green" id="ipfs-dot"></div>
-          <span id="ipfs-label">P2P ready</span>
+          <div class="ipfs-dot green" id="lobby-ipfs-dot"></div>
+          <span class="ipfs-label" id="lobby-ipfs-label">P2P ready</span>
           <span id="id-fingerprint" style="color:rgba(255,255,255,0.25);font-family:monospace;margin-left:4px"></span>
         </div>
       </div>
@@ -1129,10 +1134,10 @@
         </div>
       </div>
 
-      <!-- IPFS node status — always visible, bottom-left -->
+      <!-- P2P status — always visible, bottom-left -->
       <div id="ipfs-status" style="pointer-events:none">
-        <div class="ipfs-dot yellow" id="ipfs-dot"></div>
-        <span id="ipfs-label">IPFS starting…</span>
+        <div class="ipfs-dot yellow"></div>
+        <span class="ipfs-label">P2P · connecting…</span>
         <span id="ipfs-peers"></span>
       </div>
 

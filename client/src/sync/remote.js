@@ -783,9 +783,17 @@ export class RemoteSync {
 // Returns a stop() function.
 
 export async function discoverActiveRooms (onUpdate) {
-  const nodeWsUrl  = resolveNodeUrl()
+  const nodeWsUrl = resolveNodeUrl()
+
+  // No node configured (DHT path) — nothing to query, return a clean no-op.
+  // Callers get an empty list immediately; the stop function is safe to call.
+  if (!nodeWsUrl) {
+    onUpdate([])
+    return () => {}
+  }
+
   // Convert ws:// or wss:// to http:// or https://
-  const apiBase    = nodeWsUrl.replace(/^ws(s?):\/\//, 'http$1://').replace(/:4002$/, ':3000')
+  const apiBase = nodeWsUrl.replace(/^ws(s?):\/\//, 'http$1://').replace(/:4002$/, ':3000')
 
   let   stopped    = false
   const STALE_MS   = 90_000
