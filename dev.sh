@@ -20,9 +20,10 @@ LAN_IP=$(ipconfig getifaddr en0 2>/dev/null \
       || echo "127.0.0.1")
 
 # ── Ports ─────────────────────────────────────────────────────────────────────
-XN_TCP=4001     # xpacenode libp2p TCP  (node ↔ node)
-XN_WS=4002      # xpacenode WebSocket   (browser clients)
-XN_API=3000     # xpacenode HTTP API    (/health /rooms /info)
+XN_TCP=4001     # xpacenode libp2p TCP        (node ↔ node)
+XN_WS=4002      # xpacenode libp2p WS         (node ↔ node)
+XN_BRIDGE=4003  # xpacenode WS bridge         (browser clients)
+XN_API=3000     # xpacenode HTTP API          (/health /rooms /info)
 FE_PORT=5199    # SpaceWork Vite dev server
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,11 +46,12 @@ DATA_DIR="/tmp/xpacenode-dev"
 mkdir -p "$DATA_DIR"
 
 log "Starting xpacenode on :${XN_WS} (WS) :${XN_API} (API)..."
-NODE_HOST="$LAN_IP"       \
-NODE_TCP_PORT="$XN_TCP"   \
-NODE_WS_PORT="$XN_WS"     \
-NODE_API_PORT="$XN_API"   \
-DATA_DIR="$DATA_DIR"       \
+NODE_HOST="$LAN_IP"           \
+NODE_TCP_PORT="$XN_TCP"       \
+NODE_WS_PORT="$XN_WS"         \
+NODE_BRIDGE_PORT="$XN_BRIDGE" \
+NODE_API_PORT="$XN_API"       \
+DATA_DIR="$DATA_DIR"           \
 node "$NODE_DIR/src/index.js" 2>&1 | sed 's/^/  \x1b[36m[node]\x1b[0m /' &
 NODE_PID=$!
 
@@ -67,7 +69,7 @@ ok "xpacenode ready"
 log "Starting SpaceWork on :${FE_PORT}..."
 (
   cd "$ROOT/client"
-  VITE_XPACENODE_URL="ws://${LAN_IP}:${XN_WS}" \
+  VITE_XPACENODE_URL="ws://${LAN_IP}:${XN_BRIDGE}" \
     npx vite --port "$FE_PORT" --host \
     2>&1 | sed 's/^/  \x1b[32m[vite]\x1b[0m /'
 ) &

@@ -26,12 +26,13 @@ import { createApi }    from './api.js'
 
 // ── Config (from env — injected by docker-compose) ────────────────────────────
 const cfg = {
-  host:       process.env.NODE_HOST      || '0.0.0.0',
-  tcpPort:    parseInt(process.env.NODE_TCP_PORT  || '4001', 10),
-  wsPort:     parseInt(process.env.NODE_WS_PORT   || '4002', 10),
-  apiPort:    parseInt(process.env.NODE_API_PORT  || '3000', 10),
-  dataDir:    process.env.DATA_DIR       || '/data',
-  bootstraps: (process.env.BOOTSTRAP_PEERS || '').split(',').filter(Boolean),
+  host:        process.env.NODE_HOST        || '0.0.0.0',
+  tcpPort:     parseInt(process.env.NODE_TCP_PORT    || '4001', 10),
+  wsPort:      parseInt(process.env.NODE_WS_PORT     || '4002', 10),
+  bridgePort:  parseInt(process.env.NODE_BRIDGE_PORT || '4003', 10),
+  apiPort:     parseInt(process.env.NODE_API_PORT    || '3000', 10),
+  dataDir:     process.env.DATA_DIR         || '/data',
+  bootstraps:  (process.env.BOOTSTRAP_PEERS || '').split(',').filter(Boolean),
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
@@ -59,7 +60,7 @@ async function main () {
 
   // ── 4. WebSocket bridge ─────────────────────────────────────────────────────
   const bridge = new Bridge(router, rooms, nodeId, null /* key wired in Phase 2 */)
-  bridge.start(cfg.wsPort)
+  bridge.start(cfg.bridgePort)
 
   // ── 5. HTTP API ─────────────────────────────────────────────────────────────
   const app    = createApi(node, rooms, bridge)
