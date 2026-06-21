@@ -1004,7 +1004,7 @@
         font-weight: 600; color: #fff;
       }
     </style>
-    <script type="module" crossorigin src="./assets/index-RWzbyzT6.js"></script>
+    <script type="module" crossorigin src="./assets/index-CZhVlecw.js"></script>
     <link rel="modulepreload" crossorigin href="./assets/trystero-zRWdb5Z0.js">
   </head>
   <body>
@@ -1027,16 +1027,16 @@
         <!-- ── DEFAULT STATE (no link in URL) ────────────────────────────── -->
         <div id="lobby-default" style="width:100%">
           <p class="lobby-sub" style="margin-bottom:4px">
-            Create a room and share the link.<br/>
-            Everyone with the link meets in the same space.
+            Everyone spawns in main.<br/>
+            Open the link — you're already together.
           </p>
         </div>
 
         <!-- Name input — always shown -->
         <input class="lobby-input" id="username" type="text" placeholder="Your name" maxlength="20" autofocus />
 
-        <!-- Room name — shown only in default state -->
-        <div class="lobby-room-row" id="lobby-room-row">
+        <!-- Room name — only shown when joining a non-main room via URL -->
+        <div class="lobby-room-row" id="lobby-room-row" style="display:none">
           <input class="lobby-input lobby-input-room" id="room-name" type="text"
             placeholder="Room name  (default: main)" maxlength="40" autocomplete="off"
             style="letter-spacing:0.04em;" />
@@ -1055,11 +1055,11 @@
         </div>
 
         <!-- CTA buttons -->
-        <!-- Invited state: single "Join Room" button -->
-        <button class="lobby-btn" id="enter-btn" style="display:none">Join Room →</button>
+        <!-- Primary enter button — shown for all states -->
+        <button class="lobby-btn" id="enter-btn" style="display:none">Enter main →</button>
 
-        <!-- Default state: "Create Room" primary + "Enter" for named rooms -->
-        <div id="lobby-create-row" style="width:100%;display:flex;flex-direction:column;gap:10px">
+        <!-- Legacy create/join row — kept for possible future use, hidden by default -->
+        <div id="lobby-create-row" style="width:100%;display:none;flex-direction:column;gap:10px">
           <button class="lobby-btn" id="create-btn">+ Create Room</button>
           <button class="lobby-btn" id="join-named-btn"
             style="background:transparent;border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.6)">
