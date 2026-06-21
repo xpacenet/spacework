@@ -209,14 +209,20 @@ import { WorldHistory }      from './universe/index.js'
     } else if (link.type === 'plain') {
       // ── Plain #room-name in URL ───────────────────────────────────────────
       if (roomInput) roomInput.value = link.roomId
+      setRoomName(link.roomId)
       defaultEl.style.display  = 'none'
       createRow.style.display  = 'none'
       enterBtn.style.display   = 'block'
       enterBtn.textContent     = `Enter ${link.roomId} →`
 
     } else {
-      // ── No link — show Create / Join ─────────────────────────────────────
-      invitedEl.style.display  = 'none'
+      // ── No link — everyone goes to main ──────────────────────────────────
+      invitedEl.style.display = 'none'
+      createRow.style.display = 'none'
+      roomRow.style.display   = 'none'
+      enterBtn.style.display  = 'block'
+      enterBtn.textContent    = 'Enter main →'
+      setRoomName('main')
     }
 
     // Create room button
@@ -357,7 +363,8 @@ import { WorldHistory }      from './universe/index.js'
     }).join('')
     _activeRoomsListEl.querySelectorAll('.lobby-room-chip').forEach(btn => {
       btn.addEventListener('click', () => {
-        if (roomInput) roomInput.value = btn.dataset.room
+        setRoomName(btn.dataset.room)
+        enterBtn.textContent = `Enter ${btn.dataset.room} →`
       })
     })
   })
