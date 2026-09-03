@@ -8,3 +8,4 @@ dist/
 # Claude Code internal files
 client/.claude/
 .claude/
+xpacenet/xpacenode/.local-data/
