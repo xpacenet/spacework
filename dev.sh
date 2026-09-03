@@ -13,18 +13,34 @@ log()  { echo -e "${C}[dev]${R} $*"; }
 ok()   { echo -e "${G}[dev]${R} $*"; }
 warn() { echo -e "${Y}[dev]${R} $*"; }
 
-# ── LAN IP (try common Mac interfaces) ───────────────────────────────────────
-LAN_IP=$(ipconfig getifaddr en0 2>/dev/null \
-      || ipconfig getifaddr en1 2>/dev/null \
-      || ipconfig getifaddr en2 2>/dev/null \
-      || echo "127.0.0.1")
+# ── LAN IP ────────────────────────────────────────────────────────────────────
+# Override directly (LAN_IP=192.168.1.23 ./dev.sh) when auto-detection picks
+# the wrong interface, or on a platform/network setup neither branch below
+# handles. Auto-detection order: macOS common interface names, then Linux
+# (whatever `ip route` says is the outbound interface -- correct on far more
+# network setups than a hardcoded interface name would be), then localhost.
+# Falling back to 127.0.0.1 without ever attempting Linux detection would
+# silently make this script's own "every device on your WiFi can connect"
+# claim false on every non-Mac machine -- worth actually detecting, not just
+# swallowing into the same fallback everything else lands on.
+if [ -z "${LAN_IP:-}" ]; then
+  LAN_IP=$(ipconfig getifaddr en0 2>/dev/null \
+        || ipconfig getifaddr en1 2>/dev/null \
+        || ipconfig getifaddr en2 2>/dev/null \
+        || ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") print $(i+1)}' \
+        || echo "127.0.0.1")
+fi
 
 # ── Ports ─────────────────────────────────────────────────────────────────────
-XN_TCP=4001     # xpacenode libp2p TCP        (node ↔ node)
-XN_WS=4002      # xpacenode libp2p WS         (node ↔ node)
-XN_BRIDGE=4003  # xpacenode WS bridge         (browser clients)
-XN_API=3000     # xpacenode HTTP API          (/health /rooms /info)
-FE_PORT=5199    # SpaceWork Vite dev server
+# Overridable via env, not hardcoded -- a machine already running something
+# on one of these defaults (a different local project, another instance of
+# this same script) shouldn't require editing the script to work around it:
+#   XN_API=3098 ./dev.sh
+XN_TCP="${XN_TCP:-4001}"        # xpacenode libp2p TCP        (node ↔ node)
+XN_WS="${XN_WS:-4002}"          # xpacenode libp2p WS         (node ↔ node)
+XN_BRIDGE="${XN_BRIDGE:-4003}"  # xpacenode WS bridge         (browser clients)
+XN_API="${XN_API:-3000}"        # xpacenode HTTP API          (/health /rooms /info)
+FE_PORT="${FE_PORT:-5199}"      # SpaceWork Vite dev server
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
