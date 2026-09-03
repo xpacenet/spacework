@@ -91,19 +91,24 @@ accessible from every device on the same WiFi. Press `Ctrl+C` to stop both.
 
 ## Deploying your own xpacenode
 
-xpacenode is the signaling + discovery node. Anyone can run one on a Linux server.
+xpacenode is the signaling + discovery node — the shared swarm mesh network
+SpaceWork, SpaceVilla, and other xpacenet apps all connect through. It's its
+own repo now, not part of this one: **[github.com/xpacenet/xpacenode](https://github.com/xpacenet/xpacenode)**.
 
 **One command on any Ubuntu server:**
 ```bash
-curl -sSL https://raw.githubusercontent.com/xpacenet/spacework/main/xpacenet/xpacenode/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/xpacenet/xpacenode/main/install.sh | sudo bash
 ```
 
 Then set up a domain + WSS (required for HTTPS clients):
 ```bash
-sudo /opt/xpacenode/xpacenet/xpacenode/setup-domain.sh
+sudo /opt/xpacenode/setup-domain.sh
 ```
 
-Full guide: [`xpacenet/xpacenode/README.md`](xpacenet/xpacenode/README.md)
+Full guide: [xpacenode's own README](https://github.com/xpacenet/xpacenode/blob/main/README.md)
+
+For local development, `./dev.sh` in this repo needs a checkout of `xpacenode`
+as a sibling directory — see "Running locally" below.
 
 ---
 
