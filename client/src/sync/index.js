@@ -72,6 +72,10 @@ export class SpaceSync extends EventTarget {
     }
     this.#remote = remote
     this.#wireListeners()
+    // Transport is now resolved (xpacenode vs DHT fallback) — fire a status
+    // event so UI reading nodeUrl (e.g. the transport-tier badge) doesn't
+    // stay stuck on the pre-connect reading until the next peer join/leave.
+    this.#emit('status', { peerCount: this.#peers.size })
   }
 
   /**

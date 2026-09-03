@@ -70,6 +70,7 @@ log "Starting SpaceWork on :${FE_PORT}..."
 (
   cd "$ROOT/client"
   VITE_XPACENODE_URL="ws://${LAN_IP}:${XN_BRIDGE}" \
+  VITE_XPACENODE_API_URL="http://${LAN_IP}:${XN_API}" \
     npx vite --port "$FE_PORT" --host \
     2>&1 | sed 's/^/  \x1b[32m[vite]\x1b[0m /'
 ) &

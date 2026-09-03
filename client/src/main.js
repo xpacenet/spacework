@@ -145,6 +145,19 @@ import { WorldHistory }      from './universe/index.js'
     document.querySelectorAll('.ipfs-label').forEach(el => {
       el.textContent = `P2P · ${identity.shortId}`
     })
+    // Transport-tier badge — makes the silent xpacenode→DHT fallback visible.
+    // nodeUrl is set once RemoteSync has actually connected; null means
+    // SpaceSync fell back to TrysteroSync (BitTorrent DHT signaling — much
+    // slower, see sync/index.js#start).
+    const tierEl = document.getElementById('ipfs-tier')
+    if (tierEl && _syncStarted) {
+      const onNode = !!spaceSync.nodeUrl
+      tierEl.textContent = onNode ? 'xpacenode' : 'DHT fallback (slow)'
+      tierEl.className   = onNode ? 'tier-node' : 'tier-fallback'
+      tierEl.title = onNode
+        ? `Connected via ${spaceSync.nodeUrl}`
+        : 'xpacenode was unreachable — using public BitTorrent-tracker signaling instead'
+    }
     if (peerCount !== undefined) {
       document.querySelectorAll('#ipfs-peers').forEach(el => {
         if (peerCount > 0) {
