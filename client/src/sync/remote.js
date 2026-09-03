@@ -778,6 +778,34 @@ export class RemoteSync {
   #fire   (type, data) { this.#handlers[type]?.forEach(cb => cb(data)) }
 }
 
+// ── xpacenode HTTP API URL ─────────────────────────────────────────────────────
+// The API (default :3000) and the WS bridge (default :4003) are independently
+// configurable — there is no reliable way to derive one from the other's port.
+// Resolve it explicitly, same ladder as resolveNodeUrl.
+function resolveApiUrl (nodeWsUrl) {
+  // 1. URL query param ?nodeApi=
+  const urlParam = new URLSearchParams(window.location.search).get('nodeApi')
+  if (urlParam) return urlParam
+
+  // 2. Build-time env var
+  if (import.meta.env?.VITE_XPACENODE_API_URL) return import.meta.env.VITE_XPACENODE_API_URL
+
+  // 3. Best-effort fallback: same host, no port, http(s) scheme.
+  //    Correct when the API is reverse-proxied on the same host as the bridge
+  //    (e.g. a production domain serving both behind one proxy). Wrong
+  //    whenever the API runs on a different port than the bridge, which is
+  //    the local-dev default (dev.sh: bridge :4003, API :3000) — pass
+  //    VITE_XPACENODE_API_URL or ?nodeApi= explicitly in that case.
+  if (!nodeWsUrl) return null
+  try {
+    const u = new URL(nodeWsUrl.replace(/^ws/, 'http'))
+    u.port = ''
+    return u.toString().replace(/\/$/, '')
+  } catch {
+    return null
+  }
+}
+
 // ── Room discovery (lobby) ─────────────────────────────────────────────────────
 // Polls the xpacenode HTTP API for active rooms.
 // Returns a stop() function.
@@ -792,8 +820,11 @@ export async function discoverActiveRooms (onUpdate) {
     return () => {}
   }
 
-  // Convert ws:// or wss:// to http:// or https://
-  const apiBase = nodeWsUrl.replace(/^ws(s?):\/\//, 'http$1://').replace(/:4002$/, ':3000')
+  const apiBase = resolveApiUrl(nodeWsUrl)
+  if (!apiBase) {
+    onUpdate([])
+    return () => {}
+  }
 
   let   stopped    = false
   const STALE_MS   = 90_000

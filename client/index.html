@@ -646,6 +646,12 @@
       .ipfs-dot.green  { background: #00e676; box-shadow: 0 0 6px #00e676; }
       .ipfs-dot.red    { background: #ff4444; }
       #ipfs-peers { color: rgba(255,255,255,0.35); margin-left: 4px; }
+      #ipfs-tier {
+        margin-left: 6px; padding: 1px 6px; border-radius: 3px;
+        font-size: 0.68rem; letter-spacing: 0.02em;
+      }
+      #ipfs-tier.tier-node     { color: rgba(120,255,160,0.7); background: rgba(120,255,160,0.08); }
+      #ipfs-tier.tier-fallback { color: rgba(255,180,60,0.8);  background: rgba(255,180,60,0.1); }
 
       /* HUD network map button */
       #nm-open-btn { top: 56px; }
@@ -1139,6 +1145,7 @@
         <div class="ipfs-dot yellow"></div>
         <span class="ipfs-label">P2P · connecting…</span>
         <span id="ipfs-peers"></span>
+        <span id="ipfs-tier"></span>
       </div>
 
       <!-- Mode badge (hidden — replaced by pill below) -->
