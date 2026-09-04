@@ -49,8 +49,29 @@ echo -e "${B}${C}xpacenet — local dev${R}"
 echo -e "  LAN IP : ${B}${LAN_IP}${R}"
 echo ""
 
-# ── 1. Install xpacenode deps if missing ──────────────────────────────────────
-NODE_DIR="$ROOT/xpacenet/xpacenode"
+# ── 1. Locate xpacenode ────────────────────────────────────────────────────────
+# xpacenode is its own repo (github.com/xpacenet/xpacenode) — a shared swarm
+# module other xpacenet apps (SpaceVilla, future streaming/video apps) use
+# too, not something private to this repo. Default assumes it's checked out
+# as a sibling directory (matching `stablekredit/`, `spacework/`, `spaxerail/`
+# all sitting next to each other under xpacenet/); override when it lives
+# somewhere else:
+#   XPACENODE_DIR=/path/to/xpacenode ./dev.sh
+NODE_DIR="${XPACENODE_DIR:-$ROOT/../xpacenode}"
+if [ ! -d "$NODE_DIR/src" ]; then
+  echo -e "${Y}[dev]${R} Couldn't find xpacenode at: ${B}${NODE_DIR}${R}"
+  echo ""
+  echo "  xpacenode is a separate repo. Clone it as a sibling of this one:"
+  echo ""
+  echo -e "    ${B}git clone https://github.com/xpacenet/xpacenode ${ROOT}/../xpacenode${R}"
+  echo ""
+  echo "  ...or point this script at wherever you already have it checked out:"
+  echo ""
+  echo -e "    ${B}XPACENODE_DIR=/path/to/xpacenode ./dev.sh${R}"
+  echo ""
+  exit 1
+fi
+
 if [ ! -d "$NODE_DIR/node_modules" ]; then
   log "Installing xpacenode dependencies..."
   (cd "$NODE_DIR" && npm install --silent)
