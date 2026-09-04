@@ -44,6 +44,13 @@ jobs:
         run: cd client && npm install
 
       - name: Build
+        env:
+          # Real, deployed xpacenode instance (spaxerail/docs/deployment/current-nodes.md).
+          # Baked in at build time -- Vite env vars aren't read at runtime.
+          # Falls back to DHT signaling automatically if either is unset, so
+          # this is safe to leave blank while no real node exists.
+          VITE_XPACENODE_URL: ${{ vars.VITE_XPACENODE_URL }}
+          VITE_XPACENODE_API_URL: ${{ vars.VITE_XPACENODE_API_URL }}
         run: cd client && npm run build
 
       # ── Deploy to GitHub Pages ────────────────────────────────────────────
