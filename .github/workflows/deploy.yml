@@ -60,6 +60,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./client/dist
           commit_message: "deploy: ${{ github.sha }}"
+          cname: spacework.spacevilla.xyz
 
       # ── Compute IPFS CID (offline, no account needed) ─────────────────────
       - name: Compute IPFS CID
