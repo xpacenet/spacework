@@ -97,6 +97,20 @@ class XpaceNodePool {
   #closed    = false       // true after explicit close() — suppresses reconnect
   #queue     = []          // messages buffered before connection opens
   #retries   = 0
+  #onOpenCb  = null        // fires after every (re)connect — see onOpen()
+
+  /**
+   * Register a callback that runs every time the WebSocket establishes a
+   * connection — the very first connect() AND every automatic reconnect
+   * after a drop (phone sleep, tab suspend, network blip).
+   *
+   * This is the pool's one lifecycle hook. A dropped-and-reopened
+   * WebSocket is, from the bridge's point of view, a brand-new connection
+   * that knows nothing about any room or peer — so anything that depended
+   * on that state (re-announcing our presence, re-requesting the roster)
+   * belongs here, not sprinkled through reconnect-specific branches.
+   */
+  onOpen (cb) { this.#onOpenCb = cb }
 
   async connect (url) {
     this.#url = url
@@ -113,6 +127,7 @@ class XpaceNodePool {
         // Drain buffered messages
         const q = this.#queue.splice(0)
         q.forEach(m => ws.send(m))
+        this.#onOpenCb?.()
         resolve()
       }
 
@@ -387,6 +402,14 @@ export class RemoteSync {
     }
 
     this.#pool = new XpaceNodePool()
+
+    // Re-announce ourselves (and thus re-request the room roster — see
+    // #announce) every time the socket connects, including reconnects.
+    // Registering this before connect() means the very first connection
+    // and every later reconnect share the exact same path — there is no
+    // separate "reconnect protocol", just one lifecycle hook.
+    this.#pool.onOpen(() => this.#announce())
+
     const nodeStep = connLog.push('Connecting to xpacenode…', 'pending', this.#nodeUrl)
     try {
       await this.#pool.connect(this.#nodeUrl)
@@ -411,10 +434,10 @@ export class RemoteSync {
 
       this.#fire('HELLO', { from: peerId, username, presetId, status })
 
-      if (!this.#peers.has(peerId)) {
-        const isPolite = this.#selfId() < peerId
-        await this.#createPeer(peerId, isPolite)
-      }
+      // A peer_join for someone we already track is normal on every
+      // reconnect (see #announce — both sides restate presence). Only
+      // rebuild the connection if #ensureLivePeer finds it's actually dead.
+      await this.#ensureLivePeer(peerId)
     })
 
     // ── Peer leave ───────────────────────────────────────────────────────
@@ -426,21 +449,8 @@ export class RemoteSync {
     this.#pool.on('signal', async msg => {
       const { from, payload } = msg
       if (!from || !payload) return
-      if (!this.#peers.has(from)) {
-        const isPolite = this.#selfId() < from
-        await this.#createPeer(from, isPolite)
-      }
+      await this.#ensureLivePeer(from)
       await this.#peers.get(from)?.peer.handleSignal(payload)
-    })
-
-    // ── Announce ourselves to the room ───────────────────────────────────
-    this.#pool.send({
-      t:        'hello',
-      roomId:   this.#roomId,
-      peerId:   this.#selfId(),
-      username: this.#username,
-      presetId: this.#presetId,
-      status:   this.#status,
     })
 
     // Heartbeat every 30 s — two purposes:
@@ -474,8 +484,9 @@ export class RemoteSync {
   // ── Peer lifecycle ────────────────────────────────────────────────────────
 
   async #createPeer (peerId, isPolite) {
-    const peer = new RTCPeer(isPolite)
-    this.#peers.set(peerId, { identityId: peerId, peer })
+    const peer  = new RTCPeer(isPolite)
+    const entry = { identityId: peerId, peer, hasBeenOpen: false }
+    this.#peers.set(peerId, entry)
 
     // Route WebRTC signals through xpacenode
     peer.addEventListener('signal', ({ detail }) => {
@@ -504,6 +515,12 @@ export class RemoteSync {
     //   2. Send state_req (ask peer for their full presence snapshot)
     //   3. Record peerId for future direct reconnections
     peer.addEventListener('open', () => {
+      // Record that this connection has been live at least once — the
+      // signal that lets #ensureLivePeer tell "dead, was working before"
+      // (rebuild it) apart from "still negotiating for the first time"
+      // (leave it alone).
+      entry.hasBeenOpen = true
+
       peer.send({
         type:       'intro',
         identityId: this.#selfId(),
@@ -535,6 +552,62 @@ export class RemoteSync {
     entry.peer.close()
     this.#peers.delete(peerId)
     this.#fire('PEER_LEAVE', { from: peerId })
+  }
+
+  /**
+   * (Re-)announce our presence to the room.
+   *
+   * Runs on the initial connect AND every time the transport reconnects
+   * after a drop (phone sleep, tab suspend, network blip) — see
+   * `this.#pool.onOpen(...)` in start(). The bridge treats every `hello`
+   * as authoritative (see xpacenode's bridge.js #onHello): it replays a
+   * `peer_join` for each peer currently in the room back to us, AND tells
+   * those peers about us again too. That single message is what re-syncs
+   * both directions of the room roster after a reconnect — no separate
+   * "rooms" poll, no reconnect-specific protocol, no local roster caching
+   * to keep consistent. The rest of the fix (#ensureLivePeer) just makes
+   * sure that when those peer_join replies arrive, any WebRTC connection
+   * that didn't survive the drop actually gets rebuilt instead of being
+   * silently treated as still-live.
+   */
+  #announce () {
+    this.#pool.send({
+      t:        'hello',
+      roomId:   this.#roomId,
+      peerId:   this.#selfId(),
+      username: this.#username,
+      presetId: this.#presetId,
+      status:   this.#status,
+    })
+  }
+
+  /**
+   * Ensure we have a live WebRTC connection to `peerId`, rebuilding it if
+   * the existing one has gone dead.
+   *
+   * Called from both the `peer_join` and `signal` handlers — i.e. every
+   * time xpacenode tells us this peer is present. Most of the time that's
+   * a no-op restating of something we already know. But if our end's data
+   * channel had been open before and is not open now, the old RTCPeer is a
+   * zombie left over from a network drop that this side never cleanly
+   * detected (the classic "phone went to sleep" case, from either peer's
+   * side) — the fix is to throw it away and let a fresh offer/answer
+   * exchange happen, not to leave it as a silent dead end.
+   *
+   * A connection that has never opened yet (`hasBeenOpen === false`) is
+   * left alone even if not currently connected — that's just normal
+   * first-time negotiation in progress, not a stale session.
+   */
+  async #ensureLivePeer (peerId) {
+    const entry = this.#peers.get(peerId)
+    if (entry) {
+      const isDead = entry.hasBeenOpen && !entry.peer.connected
+      if (!isDead) return
+      entry.peer.close()
+      this.#peers.delete(peerId)
+    }
+    const isPolite = this.#selfId() < peerId
+    await this.#createPeer(peerId, isPolite)
   }
 
   // ── Data channel message dispatch ─────────────────────────────────────────
