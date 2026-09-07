@@ -176,7 +176,7 @@ export class RemoteSync {
     })
 
     const registry = new MessageRegistry()
-      .register('chat',      { persist: true })   // the one type that needs to survive a reload
+      .register('chat',      { persist: true, queueOnFail: true })   // survives a reload AND a sent-while-isolated moment
       .register('move',      { persist: false })
       .register('avatar',    { persist: false })
       .register('status',    { persist: false })
