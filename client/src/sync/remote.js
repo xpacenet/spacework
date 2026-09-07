@@ -176,7 +176,7 @@ export class RemoteSync {
     })
 
     const registry = new MessageRegistry()
-      .register('chat',      { persist: true, queueOnFail: true })   // survives a reload AND a sent-while-isolated moment
+      .register('chat',      { persist: true, queueOnFail: true })   // survives a reload AND a sent-while-isolated moment (xpacesync PeerMesh.peerIds now correctly excludes not-yet-open peers, so this isolation check can't be fooled by a peer still mid-handshake)
       .register('move',      { persist: false })
       .register('avatar',    { persist: false })
       .register('status',    { persist: false })
