@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: spacework
 
@@ -25,14 +25,14 @@ jobs:
       # sibling directory under $GITHUB_WORKSPACE so that path resolves
       # exactly the way it does on a local checkout of both repos.
       - name: Checkout xpacesync (sibling dependency)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: xpacenet/xpacesync
           path: xpacesync
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install dependencies
         run: cd spacework/client && npm install
@@ -47,19 +47,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: spacework
 
       - name: Checkout xpacesync (sibling dependency)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: xpacenet/xpacesync
           path: xpacesync
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install dependencies
         run: cd spacework/client && npm install
