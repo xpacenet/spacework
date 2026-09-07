@@ -17,11 +17,22 @@ import { recordPeer }     from './roomLink.js'
 import { presenceStore }  from './presenceStore.js'
 import { idleScheduler }  from './idleScheduler.js'
 
+// STUN only, no TURN — this path runs precisely when there's no xpacenode
+// configured at all (the zero-config DHT fallback), so there's no self-hosted
+// coturn to source a relay credential from either. openrelay.metered.ca (the
+// same dead free relay removed from remote.js's xpacenode path) was still
+// hardcoded here — a genuinely separate file `git grep` on the whole repo
+// found, missed by the original fix because that fix only touched the
+// xpacenode-configured path. It matters more here, not less: this is
+// exactly the fallback that activates when xpacenode is unreachable, the
+// same failure shape this whole redesign exists to fix. Google's public
+// STUN stays as the last-resort default — same reasoning as PeerMesh's own
+// DEFAULT_ICE_SERVERS: STUN carries no media and needs no credential, a
+// fundamentally different, much lower-risk class of dependency than a TURN
+// relay.
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'turn:openrelay.metered.ca:80',               username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:80?transport=tcp',  username: 'openrelayproject', credential: 'openrelayproject' },
 ]
 
 export class TrysteroSync {
