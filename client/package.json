@@ -14,6 +14,7 @@
   "dependencies": {
     "@noble/curves": "^2.2.0",
     "@trystero-p2p/torrent": "^0.24.0",
+    "@xpacenet/xpacesync": "file:../../xpacesync",
     "three": "^0.165.0"
   },
   "devDependencies": {

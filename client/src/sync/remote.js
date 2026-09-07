@@ -1,24 +1,30 @@
 /**
- * RemoteSync v3 — xpacenet signaling
+ * RemoteSync v4 — thin SpaceWork-specific wrapper around @xpacenet/xpacesync.
  *
- * Transport layer swap:
- *   v1: Trystero / BitTorrent DHT
- *   v2: Nostr ephemeral events (~300 ms signaling latency)
- *   v3: xpacenode WebSocket bridge (~10–30 ms signaling latency)
+ * Everything generic (signaling transport, WebRTC peer lifecycle, room
+ * membership, reconnection/rediscovery) now lives in xpacesync's PeerMesh.
+ * This file only:
+ *   - resolves which xpacenode to use (SpaceWork's own link/query/env ladder)
+ *   - registers SpaceWork's message types with xpacesync's MessageRegistry
+ *   - translates xpacesync's generic events into SpaceWork's existing
+ *     HELLO/MOVE/CHAT/... event names — index.js needed zero changes
+ *   - keeps the presence-sync protocol (hb/state_req/state/delta) that
+ *     talks to presenceStore, since that store is SpaceWork-specific
  *
- * The WebRTC peer-to-peer layer (RTCPeer class) is identical to v2.
- * Only the signaling transport changed — xpacenode replaced NostrPool.
+ * The one real behavior change: chat now has a durable local log
+ * (xpacesync's MessageLog). A full page reload — the common case on
+ * mobile, since most browsers discard a backgrounded tab rather than
+ * merely suspend it — used to lose all chat history even though
+ * reconnection itself worked fine. `history('chat')` replay on start()
+ * fixes that.
  *
- * xpacenode is the smallest routing unit in xpacenet.
- * It routes signed messages without reading their content.
- * SpaceWork is one client application on top of xpacenet.
- *
- * Node URL resolution order:
+ * Node URL resolution order (unchanged):
  *   1. ?node=ws://... in the URL query string (portable invite link)
  *   2. import.meta.env.VITE_XPACENODE_URL (build-time config)
  *   3. ws://localhost:4002 (local dev default)
  */
 
+import { PeerMesh, RealtimeChannel, MessageRegistry } from '@xpacenet/xpacesync'
 import { getIdentity }    from '../identity/index.js'
 import {
   parseCurrentLink,
@@ -85,250 +91,12 @@ const ICE_SERVERS = [
   { urls: 'turn:openrelay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
 ]
 
-// ── XpaceNodePool — WebSocket transport ──────────────────────────────────────
-// Thin wrapper around a WebSocket connection to an xpacenode.
-// Replaces NostrPool from v2 — same logical API, ~10x lower latency.
-
-class XpaceNodePool {
-  #ws        = null
-  #url       = ''
-  #handlers  = new Map()   // type → [cb]
-  #ready     = false
-  #closed    = false       // true after explicit close() — suppresses reconnect
-  #queue     = []          // messages buffered before connection opens
-  #retries   = 0
-  #onOpenCb  = null        // fires after every (re)connect — see onOpen()
-
-  /**
-   * Register a callback that runs every time the WebSocket establishes a
-   * connection — the very first connect() AND every automatic reconnect
-   * after a drop (phone sleep, tab suspend, network blip).
-   *
-   * This is the pool's one lifecycle hook. A dropped-and-reopened
-   * WebSocket is, from the bridge's point of view, a brand-new connection
-   * that knows nothing about any room or peer — so anything that depended
-   * on that state (re-announcing our presence, re-requesting the roster)
-   * belongs here, not sprinkled through reconnect-specific branches.
-   */
-  onOpen (cb) { this.#onOpenCb = cb }
-
-  async connect (url) {
-    this.#url = url
-    return new Promise((resolve, reject) => {
-      const ws = new WebSocket(url)
-      this.#ws = ws
-
-      const timeout = setTimeout(() => reject(new Error('xpacenode connect timeout')), 10_000)
-
-      ws.onopen = () => {
-        clearTimeout(timeout)
-        this.#ready   = true
-        this.#retries = 0
-        // Drain buffered messages
-        const q = this.#queue.splice(0)
-        q.forEach(m => ws.send(m))
-        this.#onOpenCb?.()
-        resolve()
-      }
-
-      ws.onmessage = ({ data }) => {
-        try {
-          const msg = JSON.parse(data)
-          this.#dispatch(msg)
-        } catch { /* malformed — drop */ }
-      }
-
-      ws.onerror = err => {
-        clearTimeout(timeout)
-        reject(err)
-      }
-
-      ws.onclose = () => {
-        this.#ready = false
-        this.#reconnect()
-      }
-    })
-  }
-
-  send (msg) {
-    const s = JSON.stringify(msg)
-    if (this.#ready && this.#ws?.readyState === WebSocket.OPEN) {
-      this.#ws.send(s)
-    } else {
-      this.#queue.push(s)   // buffer until reconnect
-    }
-  }
-
-  on (type, cb) {
-    if (!this.#handlers.has(type)) this.#handlers.set(type, [])
-    this.#handlers.get(type).push(cb)
-  }
-
-  close () {
-    this.#closed = true    // prevent reconnect loop after intentional close
-    this.#ready  = false
-    this.#ws?.close()
-  }
-
-  #dispatch (msg) {
-    const cbs = this.#handlers.get(msg.t)
-    cbs?.forEach(cb => cb(msg))
-  }
-
-  #reconnect () {
-    if (this.#closed) return    // explicit close — do not reconnect
-    const delay = Math.min(1000 * 2 ** this.#retries++, 30_000)
-    console.warn(`[xpacenode] disconnected — reconnecting in ${delay}ms`)
-    setTimeout(() => {
-      if (this.#closed) return
-      this.connect(this.#url).catch(() => { /* next retry handles it */ })
-    }, delay)
-  }
-}
-
-// ── RTCPeer ────────────────────────────────────────────────────────────────────
-// Unchanged from v2 — perfect-negotiation WebRTC peer.
-
-class RTCPeer extends EventTarget {
-  #pc
-  #dc              = null
-  #isPolite        = false
-  #makingOffer     = false
-  #ignoreOffer     = false
-  #onMessageCb     = null
-  #onTrackCb       = null
-  #iceQueue        = []
-  #hasRemoteDesc   = false
-
-  #negotiate = async () => {
-    if (this.#makingOffer) return
-    if (this.#pc.signalingState !== 'stable') return
-    try {
-      this.#makingOffer = true
-      await this.#pc.setLocalDescription()
-      this.dispatchEvent(new CustomEvent('signal', {
-        detail: { type: 'offer', sdp: this.#pc.localDescription.sdp },
-      }))
-    } catch (err) {
-      console.warn('[RTCPeer] negotiate error', err)
-    } finally {
-      this.#makingOffer = false
-    }
-  }
-
-  constructor (isPolite) {
-    super()
-    this.#isPolite = isPolite
-    this.#pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
-
-    if (!isPolite) {
-      this.#dc = this.#pc.createDataChannel('sw', { ordered: true })
-      this.#hookDC(this.#dc)
-    }
-
-    this.#pc.ondatachannel = ({ channel }) => {
-      this.#dc = channel
-      this.#hookDC(channel)
-    }
-
-    this.#pc.onicecandidate = ({ candidate }) => {
-      if (candidate) {
-        this.dispatchEvent(new CustomEvent('signal', {
-          detail: { type: 'ice', candidate: candidate.toJSON() },
-        }))
-      }
-    }
-
-    this.#pc.onnegotiationneeded = this.#negotiate
-
-    this.#pc.ontrack = ({ track, streams }) => {
-      const stream = streams[0] ?? new MediaStream([track])
-      this.#onTrackCb?.(track, stream)
-    }
-
-    this.#pc.onconnectionstatechange = () => {
-      if (this.#pc.connectionState === 'failed') {
-        this.dispatchEvent(new CustomEvent('failed'))
-      }
-    }
-  }
-
-  #hookDC (dc) {
-    dc.onopen    = () => this.dispatchEvent(new CustomEvent('open'))
-    dc.onclose   = () => this.dispatchEvent(new CustomEvent('close'))
-    dc.onmessage = ({ data }) => {
-      try { this.#onMessageCb?.(JSON.parse(data)) } catch {}
-    }
-  }
-
-  async handleSignal ({ type, sdp, candidate }) {
-    try {
-      if (type === 'offer') {
-        const hadLocalOffer = this.#pc.signalingState === 'have-local-offer'
-        const collision     = this.#makingOffer || hadLocalOffer
-        this.#ignoreOffer   = !this.#isPolite && collision
-        if (this.#ignoreOffer) return
-
-        await this.#pc.setRemoteDescription({ type: 'offer', sdp })
-        this.#hasRemoteDesc = true
-        await this.#pc.setLocalDescription()
-        this.dispatchEvent(new CustomEvent('signal', {
-          detail: { type: 'answer', sdp: this.#pc.localDescription.sdp },
-        }))
-        await this.#drainIceQueue()
-
-        if (this.#isPolite && hadLocalOffer) setTimeout(this.#negotiate, 200)
-
-      } else if (type === 'answer') {
-        if (this.#pc.signalingState === 'have-local-offer') {
-          await this.#pc.setRemoteDescription({ type: 'answer', sdp })
-          this.#hasRemoteDesc = true
-          await this.#drainIceQueue()
-        }
-
-      } else if (type === 'ice') {
-        if (!this.#hasRemoteDesc) {
-          this.#iceQueue.push(candidate)
-        } else {
-          try { await this.#pc.addIceCandidate(candidate) } catch (err) {
-            if (!this.#ignoreOffer) console.warn('[RTCPeer] addIceCandidate', err)
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[RTCPeer] handleSignal', type, err)
-    }
-  }
-
-  async #drainIceQueue () {
-    const queued = this.#iceQueue.splice(0)
-    for (const c of queued) {
-      try { await this.#pc.addIceCandidate(c) } catch {}
-    }
-  }
-
-  send (msg) {
-    if (this.#dc?.readyState === 'open') this.#dc.send(JSON.stringify(msg))
-  }
-
-  addTrack (track, stream) { try { this.#pc.addTrack(track, stream) } catch {} }
-
-  onMessage (cb) { this.#onMessageCb = cb }
-  onTrack   (cb) { this.#onTrackCb   = cb }
-
-  get pc ()        { return this.#pc }
-  get connected () { return this.#dc?.readyState === 'open' }
-
-  close () { try { this.#pc.close() } catch {} }
-}
-
 // ── RemoteSync ────────────────────────────────────────────────────────────────
-// Drop-in replacement — identical public API to v2.
+// Public API is identical to v3 — index.js and main.js need no changes.
 
 export class RemoteSync {
-  #pool           = null    // XpaceNodePool
-  #peers          = new Map()   // peerId → { identityId, peer: RTCPeer }
-  #handlers       = {}
+  #mesh           = null    // PeerMesh
+  #channel        = null    // RealtimeChannel
   #username       = ''
   #presetId       = 0
   #status         = 'available'
@@ -338,8 +106,8 @@ export class RemoteSync {
   #knownPeers     = []          // peer IDs from previous sessions
   #voiceCb        = null
   #pendingTracks  = []
-  #localTracks    = []
-  #heartbeatTimer = null
+  #handlers       = {}
+  #hbTimer        = null
 
   /**
    * Own monotonic version counter.
@@ -366,7 +134,6 @@ export class RemoteSync {
     this.#knownPeers = link.peers ?? []
 
     if (link.type === 'link') {
-      // Encoded xn_ invite link — show what was decoded
       connLog.ok(roomStep, `Invite link decoded → room: ${this.#roomName}`)
       connLog.info('Room address is hashed — connection is private')
       if (link.node) {
@@ -401,69 +168,170 @@ export class RemoteSync {
       })
     }
 
-    this.#pool = new XpaceNodePool()
+    // ── Step 4: build the mesh + channel, wire every message type ─────────────
+    this.#mesh = new PeerMesh({
+      selfId:       this.#selfId(),
+      iceServers:   ICE_SERVERS,
+      introPayload: () => ({ username: this.#username, presetId: this.#presetId, status: this.#status }),
+    })
 
-    // Re-announce ourselves (and thus re-request the room roster — see
-    // #announce) every time the socket connects, including reconnects.
-    // Registering this before connect() means the very first connection
-    // and every later reconnect share the exact same path — there is no
-    // separate "reconnect protocol", just one lifecycle hook.
-    this.#pool.onOpen(() => this.#announce())
+    const registry = new MessageRegistry()
+      .register('chat',      { persist: true })   // the one type that needs to survive a reload
+      .register('move',      { persist: false })
+      .register('avatar',    { persist: false })
+      .register('status',    { persist: false })
+      .register('talking',   { persist: false })
+      .register('hb',        { persist: false })
+      .register('state_req', { persist: false })
+      .register('state',     { persist: false })
+      .register('delta',     { persist: false })
 
+    this.#channel = new RealtimeChannel(this.#mesh, { registry })
+
+    // ── Peer lifecycle (mesh-level) ────────────────────────────────────────
+    this.#mesh.addEventListener('peer:join', ({ detail: { peerId, announced } }) => {
+      const username = announced.username ?? ''
+      const isKnown  = this.#knownPeers.includes(peerId)
+      connLog.peerJoined(username || peerId.slice(0, 10))
+      if (isKnown) connLog.info(`✓ ${username || peerId.slice(0, 10)} — known peer (reconnected)`)
+
+      this.#fire('HELLO', {
+        from: peerId, username,
+        presetId: announced.presetId ?? 0,
+        status:   announced.status   ?? 'available',
+      })
+      // Rebuilding a stale connection (the phone-went-to-sleep case) is
+      // PeerMesh's own job, triggered internally on this same event.
+    })
+
+    this.#mesh.addEventListener('peer:leave', ({ detail: { peerId } }) => {
+      this.#fire('PEER_LEAVE', { from: peerId })
+    })
+
+    // Data-channel intro confirmation — same HELLO, now backed by what the
+    // peer says about itself directly over the channel rather than only
+    // via the signaling relay.
+    this.#mesh.addEventListener('peer:intro', ({ detail: { peerId, announced } }) => {
+      this.#fire('HELLO', {
+        from: peerId,
+        username: announced.username ?? '',
+        presetId: announced.presetId ?? 0,
+        status:   announced.status   ?? 'available',
+      })
+    })
+
+    // Data channel just opened: ask the peer for their full presence
+    // snapshot, and remember them for future direct reconnection.
+    this.#mesh.addEventListener('peer:open', ({ detail: { peerId } }) => {
+      this.#channel.sendTo(peerId, 'state_req', {})
+      recordPeer(this.#roomId, peerId)
+    })
+
+    this.#mesh.onTrack((track, stream, peerId) => {
+      if (this.#voiceCb) {
+        this.#voiceCb(track, stream, peerId, peerId)
+      } else {
+        this.#pendingTracks.push({ track, stream, identityId: peerId, nostrPubkey: peerId })
+      }
+    })
+
+    // ── App-level message types (via the registry — no switch statement) ────
+    this.#channel.on('chat', ({ from, payload }) => {
+      this.#fire('CHAT', { from, username: payload.username, text: payload.text, ts: payload.ts })
+    })
+
+    this.#channel.on('move', ({ from, payload }) => {
+      this.#fire('MOVE', { from, pos: payload.pos })
+    })
+
+    this.#channel.on('avatar', ({ from, payload }) => {
+      this.#fire('AVATAR_CHANGE', { from, presetId: payload.presetId })
+      presenceStore.patchPeer(from, { presetId: payload.presetId })
+    })
+
+    this.#channel.on('status', ({ from, payload }) => {
+      this.#fire('STATUS_CHANGE', { from, status: payload.status })
+      presenceStore.patchPeer(from, { status: payload.status })
+    })
+
+    this.#channel.on('talking', ({ from, payload }) => {
+      this.#fire('PEER_TALKING', { from, talking: !!payload.talking })
+    })
+
+    // The peer is still alive — reset their TTL so they are not evicted.
+    this.#channel.on('hb', ({ from }) => presenceStore.heartbeat(from))
+
+    this.#channel.on('state_req', ({ from }) => {
+      this.#channel.sendTo(from, 'state', { peers: presenceStore.getSnapshot() })
+    })
+
+    this.#channel.on('state', ({ payload }) => {
+      const myId  = this.#selfId()
+      const peers = payload.peers ?? {}
+      for (const [peerId, data] of Object.entries(peers)) {
+        if (peerId === myId) continue
+        const applied = presenceStore.upsertPeer(peerId, data)
+        if (applied && !this.#mesh.peerIds.includes(peerId)) {
+          this.#fire('HELLO', {
+            from: peerId,
+            username: data.username ?? '', presetId: data.presetId ?? 0, status: data.status ?? 'available',
+          })
+        }
+      }
+    })
+
+    this.#channel.on('delta', ({ from, payload }) => {
+      const applied = presenceStore.upsertPeer(from, payload)
+      if (applied && !this.#mesh.peerIds.includes(from)) {
+        this.#fire('HELLO', {
+          from,
+          username: payload.username ?? '', presetId: payload.presetId ?? 0, status: payload.status ?? 'available',
+        })
+      }
+    })
+
+    // ── Step 5: connect + join ─────────────────────────────────────────────
     const nodeStep = connLog.push('Connecting to xpacenode…', 'pending', this.#nodeUrl)
+    connLog.info('Searching for peers in room…')
+    connLog.startFirstTimer(12_000)
     try {
-      await this.#pool.connect(this.#nodeUrl)
+      await this.#mesh.join(this.#nodeUrl, this.#roomId)
       connLog.ok(nodeStep, this.#nodeUrl)
     } catch (err) {
       connLog.fail(nodeStep, 'xpacenode unreachable — trying public DHT route')
       throw err
     }
 
-    // ── Step 4: waiting for peers / self-as-host timer ────────────────────────
-    connLog.info('Searching for peers in room…')
-    connLog.startFirstTimer(12_000)
-
-    // ── Peer join ────────────────────────────────────────────────────────
-    this.#pool.on('peer_join', async msg => {
-      const { peerId, username = '', presetId = 0, status = 'available' } = msg
-      if (peerId === this.#selfId()) return
-
-      const isKnown = this.#knownPeers.includes(peerId)
-      connLog.peerJoined(username || peerId.slice(0, 10))
-      if (isKnown) connLog.info(`✓ ${username || peerId.slice(0,10)} — known peer (reconnected)`)
-
-      this.#fire('HELLO', { from: peerId, username, presetId, status })
-
-      // A peer_join for someone we already track is normal on every
-      // reconnect (see #announce — both sides restate presence). Only
-      // rebuild the connection if #ensureLivePeer finds it's actually dead.
-      await this.#ensureLivePeer(peerId)
+    // ── Replay chat history — the actual fix for the original bug report.
+    // A full page reload has nothing in memory; this is what makes it not
+    // matter. Must run after mesh.join() — that's what sets the real room
+    // id RealtimeChannel logs/replays under; reading history before it,
+    // history would silently look under the wrong (empty) room forever.
+    //
+    // Also deliberately NOT fired synchronously: index.js's SpaceSync only
+    // calls #wireListeners() (which registers our 'CHAT' handler) in the
+    // continuation AFTER `await remote.start()` resolves. Firing these
+    // events before that continuation has run would mean no one is
+    // listening yet, and the very history this exists to restore gets
+    // silently dropped on every reload. The fix is ordering, not a longer
+    // wait: `history()`'s own async gap already pushes past start()'s
+    // synchronous body, and the setTimeout guarantees this runs after
+    // every microtask queued so far — including that continuation, since
+    // microtasks always drain before a timer fires, however short. ──────
+    this.#channel.history('chat').then(history => {
+      setTimeout(() => {
+        for (const message of history) {
+          this.#fire('CHAT', {
+            from: message.meta.from,
+            username: message.payload.username, text: message.payload.text, ts: message.payload.ts,
+          })
+        }
+      }, 0)
     })
 
-    // ── Peer leave ───────────────────────────────────────────────────────
-    this.#pool.on('peer_leave', msg => {
-      this.#teardownPeer(msg.peerId)
-    })
-
-    // ── WebRTC signal from xpacenode ─────────────────────────────────────
-    this.#pool.on('signal', async msg => {
-      const { from, payload } = msg
-      if (!from || !payload) return
-      await this.#ensureLivePeer(from)
-      await this.#peers.get(from)?.peer.handleSignal(payload)
-    })
-
-    // Heartbeat every 30 s — two purposes:
-    //   1. Keep-alive to xpacenode (prevents server-side peer pruning)
-    //   2. Peer-to-peer heartbeat through data channels (resets TTL in remote presenceStore)
-    this.#heartbeatTimer = setInterval(() => {
-      // xpacenode keep-alive
-      this.#pool.send({ t: 'hb', roomId: this.#roomId })
-
-      // Peer heartbeat: each connected peer resets our 60 s TTL in their store
-      const hb = { type: 'hb', identityId: this.#selfId() }
-      for (const { peer } of this.#peers.values()) peer.send(hb)
-    }, 30_000)
+    // Peer-to-peer heartbeat: resets each peer's 60s TTL in their own store.
+    // (xpacenode keep-alive is PeerMesh's own internal concern, not ours.)
+    this.#hbTimer = setInterval(() => this.#channel.send('hb', {}), 30_000)
 
     // Schedule idle-time housekeeping: prune stale COLD-tier entries
     idleScheduler.schedule(
@@ -473,340 +341,42 @@ export class RemoteSync {
   }
 
   stop () {
-    clearInterval(this.#heartbeatTimer)
-    this.#pool?.send({ t: 'leave', roomId: this.#roomId })
-    this.#pool?.close()
-    for (const { peer } of this.#peers.values()) peer.close()
-    this.#peers.clear()
-    this.#pool = null
+    clearInterval(this.#hbTimer)
+    this.#mesh?.leave()
+    this.#mesh    = null
+    this.#channel = null
   }
 
-  // ── Peer lifecycle ────────────────────────────────────────────────────────
-
-  async #createPeer (peerId, isPolite) {
-    const peer  = new RTCPeer(isPolite)
-    const entry = { identityId: peerId, peer, hasBeenOpen: false }
-    this.#peers.set(peerId, entry)
-
-    // Route WebRTC signals through xpacenode
-    peer.addEventListener('signal', ({ detail }) => {
-      this.#pool?.send({
-        t:      'signal',
-        roomId: this.#roomId,
-        to:     peerId,
-        payload: detail,
-      })
-    })
-
-    // Data channel messages
-    peer.onMessage(msg => this.#handleDataMsg(msg, peerId))
-
-    // Audio / video tracks
-    peer.onTrack((track, stream) => {
-      if (this.#voiceCb) {
-        this.#voiceCb(track, stream, peerId, peerId)
-      } else {
-        this.#pendingTracks.push({ track, stream, identityId: peerId, nostrPubkey: peerId })
-      }
-    })
-
-    // Data channel open:
-    //   1. Send intro (our identity + display state)
-    //   2. Send state_req (ask peer for their full presence snapshot)
-    //   3. Record peerId for future direct reconnections
-    peer.addEventListener('open', () => {
-      // Record that this connection has been live at least once — the
-      // signal that lets #ensureLivePeer tell "dead, was working before"
-      // (rebuild it) apart from "still negotiating for the first time"
-      // (leave it alone).
-      entry.hasBeenOpen = true
-
-      peer.send({
-        type:       'intro',
-        identityId: this.#selfId(),
-        username:   this.#username,
-        presetId:   this.#presetId,
-        status:     this.#status,
-      })
-
-      // Request the peer's HOT snapshot — gives us immediate knowledge of
-      // everyone they are connected to, populating the room before we've
-      // established direct connections to each peer ourselves.
-      peer.send({ type: 'state_req', identityId: this.#selfId() })
-
-      recordPeer(this.#roomId, peerId)
-    })
-
-    // Connection failed → tear down
-    peer.addEventListener('failed', () => this.#teardownPeer(peerId))
-
-    // Add queued voice tracks
-    for (const { track, stream } of this.#localTracks) peer.addTrack(track, stream)
-
-    return peer
-  }
-
-  #teardownPeer (peerId) {
-    const entry = this.#peers.get(peerId)
-    if (!entry) return
-    entry.peer.close()
-    this.#peers.delete(peerId)
-    this.#fire('PEER_LEAVE', { from: peerId })
-  }
-
-  /**
-   * (Re-)announce our presence to the room.
-   *
-   * Runs on the initial connect AND every time the transport reconnects
-   * after a drop (phone sleep, tab suspend, network blip) — see
-   * `this.#pool.onOpen(...)` in start(). The bridge treats every `hello`
-   * as authoritative (see xpacenode's bridge.js #onHello): it replays a
-   * `peer_join` for each peer currently in the room back to us, AND tells
-   * those peers about us again too. That single message is what re-syncs
-   * both directions of the room roster after a reconnect — no separate
-   * "rooms" poll, no reconnect-specific protocol, no local roster caching
-   * to keep consistent. The rest of the fix (#ensureLivePeer) just makes
-   * sure that when those peer_join replies arrive, any WebRTC connection
-   * that didn't survive the drop actually gets rebuilt instead of being
-   * silently treated as still-live.
-   */
-  #announce () {
-    this.#pool.send({
-      t:        'hello',
-      roomId:   this.#roomId,
-      peerId:   this.#selfId(),
-      username: this.#username,
-      presetId: this.#presetId,
-      status:   this.#status,
-    })
-  }
-
-  /**
-   * Ensure we have a live WebRTC connection to `peerId`, rebuilding it if
-   * the existing one has gone dead.
-   *
-   * Called from both the `peer_join` and `signal` handlers — i.e. every
-   * time xpacenode tells us this peer is present. Most of the time that's
-   * a no-op restating of something we already know. But if our end's data
-   * channel had been open before and is not open now, the old RTCPeer is a
-   * zombie left over from a network drop that this side never cleanly
-   * detected (the classic "phone went to sleep" case, from either peer's
-   * side) — the fix is to throw it away and let a fresh offer/answer
-   * exchange happen, not to leave it as a silent dead end.
-   *
-   * A connection that has never opened yet (`hasBeenOpen === false`) is
-   * left alone even if not currently connected — that's just normal
-   * first-time negotiation in progress, not a stale session.
-   */
-  async #ensureLivePeer (peerId) {
-    const entry = this.#peers.get(peerId)
-    if (entry) {
-      const isDead = entry.hasBeenOpen && !entry.peer.connected
-      if (!isDead) return
-      entry.peer.close()
-      this.#peers.delete(peerId)
-    }
-    const isPolite = this.#selfId() < peerId
-    await this.#createPeer(peerId, isPolite)
-  }
-
-  // ── Data channel message dispatch ─────────────────────────────────────────
-
-  /**
-   * Route an incoming data-channel message from `fallbackId` (the RTCPeer map
-   * key for this connection).
-   *
-   * Message types and their purpose:
-   *
-   *   Legacy messages (unchanged from v2):
-   *     intro       — peer identity announcement (fires HELLO)
-   *     move        — position update (fires MOVE, ~20 Hz)
-   *     chat        — text message
-   *     avatar      — avatar preset change
-   *     status      — presence status change
-   *     talking     — mic activity flag
-   *     bye         — graceful disconnect
-   *
-   *   Presence-sync messages (new in v3):
-   *     hb          — peer heartbeat; resets the sender's 60 s TTL in our store
-   *     state_req   — request for our full HOT-tier snapshot
-   *     state       — snapshot response; bulk-populates presenceStore
-   *     delta       — version-gated state update (avatar/status with version)
-   *
-   * @param {object} msg         — parsed JSON from data channel
-   * @param {string} fallbackId  — RTCPeer map key (= peerId when identityId absent)
-   */
-  #handleDataMsg (msg, fallbackId) {
-    const from = msg.identityId ?? fallbackId
-
-    switch (msg.type) {
-      // ── Legacy messages ──────────────────────────────────────────────────────
-
-      case 'intro':
-        this.#fire('HELLO', {
-          from,
-          username: msg.username,
-          presetId: msg.presetId ?? 0,
-          status:   msg.status   ?? 'available',
-        })
-        break
-
-      case 'move':
-        this.#fire('MOVE', { from, pos: msg.pos })
-        break
-
-      case 'chat':
-        this.#fire('CHAT', { from, username: msg.username, text: msg.text, ts: msg.ts })
-        break
-
-      case 'avatar':
-        this.#fire('AVATAR_CHANGE', { from, presetId: msg.presetId })
-        // Keep presenceStore in sync (direct patch — no version check needed,
-        // this is a point-to-point authoritative message from the peer)
-        presenceStore.patchPeer(from, { presetId: msg.presetId })
-        break
-
-      case 'status':
-        this.#fire('STATUS_CHANGE', { from, status: msg.status })
-        presenceStore.patchPeer(from, { status: msg.status })
-        break
-
-      case 'talking':
-        this.#fire('PEER_TALKING', { from, talking: !!msg.talking })
-        break
-
-      case 'bye':
-        this.#fire('PEER_LEAVE', { from })
-        break
-
-      // ── Presence-sync messages ───────────────────────────────────────────────
-
-      case 'hb':
-        // The peer is still alive — reset their TTL so they are not evicted.
-        // No SpaceSync event needed; the avatar stays in scene as normal.
-        presenceStore.heartbeat(from)
-        break
-
-      case 'state_req': {
-        // A peer joined and asked for our current room snapshot.
-        // Respond directly through their data channel with our HOT-tier data.
-        const snapshot   = presenceStore.getSnapshot()
-        const responder  = this.#peers.get(fallbackId)?.peer
-        responder?.send({
-          type:       'state',
-          identityId: this.#selfId(),
-          peers:      snapshot,
-        })
-        break
-      }
-
-      case 'state': {
-        // Received a snapshot from a peer.  Bulk-upsert into presenceStore and
-        // fire HELLO for any peers we have not yet connected to directly.
-        // This gives instant room population on join — we learn about everyone
-        // the sender knows, even before direct WebRTC connections are set up.
-        const myId  = this.#selfId()
-        const peers = msg.peers ?? {}
-
-        for (const [peerId, data] of Object.entries(peers)) {
-          if (peerId === myId) continue   // never overwrite our own state
-
-          const applied = presenceStore.upsertPeer(peerId, data)
-          if (applied && !this.#peers.has(peerId)) {
-            // Fire HELLO so SpaceSync creates an avatar immediately.
-            // The avatar will show the peer's last known position until
-            // their first direct MOVE message arrives.
-            this.#fire('HELLO', {
-              from:     peerId,
-              username: data.username ?? '',
-              presetId: data.presetId ?? 0,
-              status:   data.status   ?? 'available',
-            })
-          }
-        }
-        break
-      }
-
-      case 'delta': {
-        // Version-gated update — carries the sender's current version counter.
-        // presenceStore.upsertPeer drops it silently if delta.v ≤ stored.v,
-        // preventing stale or replayed deltas from reverting newer state.
-        const applied = presenceStore.upsertPeer(from, msg)
-        if (applied && !this.#peers.has(from)) {
-          // Unknown peer appeared via gossip — welcome them.
-          this.#fire('HELLO', {
-            from,
-            username: msg.username ?? '',
-            presetId: msg.presetId ?? 0,
-            status:   msg.status   ?? 'available',
-          })
-        }
-        break
-      }
-    }
-  }
-
-  // ── Public API (identical to v2) ──────────────────────────────────────────
+  // ── Public API (identical to v3) ──────────────────────────────────────────
 
   move (x, y, z, ry = 0) {
-    const msg = { type: 'move', identityId: this.#selfId(), pos: { x, y, z, ry } }
-    for (const { peer } of this.#peers.values()) peer.send(msg)
+    this.#channel.send('move', { pos: { x, y, z, ry } })
   }
 
   chat (text) {
-    const msg = {
-      type: 'chat', identityId: this.#selfId(),
-      username: this.#username, text, ts: Date.now(),
-    }
-    for (const { peer } of this.#peers.values()) peer.send(msg)
+    this.#channel.send('chat', { username: this.#username, text, ts: Date.now() })
   }
 
   setAvatar (presetId) {
     this.#presetId = presetId
-    const selfId   = this.#selfId()
-
-    // Legacy `avatar` message — real-time UI update for all peers
-    const msg = { type: 'avatar', identityId: selfId, presetId }
-    for (const { peer } of this.#peers.values()) peer.send(msg)
-
-    // Versioned `delta` — allows presenceStore version-diff on recipients.
-    // The bumped version ensures late-joining peers that receive a snapshot
-    // containing this peer see the latest avatar, not a stale one.
-    const delta = {
-      type:       'delta',
-      identityId: selfId,
-      presetId,
-      v: ++this.#myVersion,
-    }
-    for (const { peer } of this.#peers.values()) peer.send(delta)
+    // Legacy immediate message — real-time UI update for all peers
+    this.#channel.send('avatar', { presetId })
+    // Versioned delta — lets late-joining peers see the latest via `state`
+    this.#channel.send('delta', { presetId, v: ++this.#myVersion })
   }
 
   setStatus (status) {
     this.#status = status
-    const selfId  = this.#selfId()
-
-    // Legacy `status` message — real-time UI update for all peers
-    const msg = { type: 'status', identityId: selfId, status }
-    for (const { peer } of this.#peers.values()) peer.send(msg)
-
-    // Versioned `delta` — keeps snapshots accurate for late joiners
-    const delta = {
-      type:       'delta',
-      identityId: selfId,
-      status,
-      v: ++this.#myVersion,
-    }
-    for (const { peer } of this.#peers.values()) peer.send(delta)
+    this.#channel.send('status', { status })
+    this.#channel.send('delta', { status, v: ++this.#myVersion })
   }
 
   broadcastTalking (talking) {
-    const msg = { type: 'talking', identityId: this.#selfId(), talking: !!talking }
-    for (const { peer } of this.#peers.values()) peer.send(msg)
+    this.#channel.send('talking', { talking: !!talking })
   }
 
   addVoiceTrack (track, stream) {
-    this.#localTracks.push({ track, stream })
-    for (const { peer } of this.#peers.values()) peer.addTrack(track, stream)
+    this.#mesh.addTrack(track, stream)
   }
 
   onVoiceTrack (cb) {
@@ -815,8 +385,9 @@ export class RemoteSync {
     for (const { track, stream, identityId, nostrPubkey } of pending) {
       if (track.readyState !== 'ended') cb(track, stream, identityId, nostrPubkey)
     }
-    for (const [peerId, { peer }] of this.#peers) {
-      for (const receiver of peer.pc.getReceivers()) {
+    // Replay tracks from peers connected before this callback was registered.
+    for (const [peerId, pc] of Object.entries(this.#mesh.getPeerConnections())) {
+      for (const receiver of pc.getReceivers()) {
         const t = receiver.track
         if (!t || t.kind !== 'audio' || t.readyState === 'ended') continue
         cb(t, new MediaStream([t]), peerId, peerId)
@@ -835,11 +406,7 @@ export class RemoteSync {
   /** The xpacenode URL this session connected to */
   get nodeUrl ()  { return this.#nodeUrl }
 
-  getPeers () {
-    const out = {}
-    for (const [peerId, { peer }] of this.#peers) out[peerId] = peer.pc
-    return out
-  }
+  getPeers () { return this.#mesh.getPeerConnections() }
 
   on (type, cb) {
     if (!this.#handlers[type]) this.#handlers[type] = []
