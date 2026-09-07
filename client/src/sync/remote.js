@@ -81,15 +81,18 @@ export function deriveRoomId () {
   return raw.replace(/[^a-z0-9-]/g, '-').replace(/-{2,}/g, '-').slice(0, 40) || 'main'
 }
 
-// ── ICE servers (STUN public + open TURN relay) ───────────────────────────────
-// xpacenode circuit relay handles libp2p-level NAT traversal.
-// These servers handle WebRTC-level NAT traversal (UDP hole punching).
-const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'turn:openrelay.metered.ca:80',              username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-]
+// ── ICE servers ─────────────────────────────────────────────────────────────
+// No hardcoded list here anymore, on purpose — this used to pull STUN from
+// Google and TURN from a free public relay (openrelay.metered.ca), and that
+// free relay dying silently broke every cross-region connection behind
+// symmetric NAT (confirmed live: same-city peers never needed it and looked
+// fine; cross-city peers on different mobile carriers had no working relay
+// at all). PeerMesh now gets its STUN/TURN from whichever xpacenode it
+// connects to — that node's own coturn instance, handed out fresh on every
+// connection (see xpacenode's turnCredentials.js) — so this app depends on
+// infrastructure this network actually runs, not a third party's goodwill.
+// PeerMesh's own built-in fallback (STUN only, no relay) covers a node that
+// hasn't configured coturn yet; nothing to pass here for that either.
 
 // ── RemoteSync ────────────────────────────────────────────────────────────────
 // Public API is identical to v3 — index.js and main.js need no changes.
@@ -169,9 +172,10 @@ export class RemoteSync {
     }
 
     // ── Step 4: build the mesh + channel, wire every message type ─────────────
+    // No iceServers passed — PeerMesh picks up whichever node it connects
+    // to's own STUN/TURN automatically. See the comment above this class.
     this.#mesh = new PeerMesh({
       selfId:       this.#selfId(),
-      iceServers:   ICE_SERVERS,
       introPayload: () => ({ username: this.#username, presetId: this.#presetId, status: this.#status }),
     })
 
